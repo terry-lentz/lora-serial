@@ -122,13 +122,30 @@ fastest mode, but no spreading gain. See the modes table below.
 > plain-English primer (spreading factor, dBm, what LoRa actually is) built on a
 > "talking across a field" analogy. No jargon, no math.
 
+### Other radios (LoRa vs SiK vs HaLow)
+
+This project uses **LoRa** for its decode-below-the-noise range at very low
+power. If you need more raw speed, a different radio might fit better — a swap is
+a **throughput/feature upgrade, not a reliability fix** (the flakiness in this
+project's history was software, since fixed, not the radio). The short version:
+
+| Radio | Modulation | Throughput | Range | Best for |
+|---|---|---|---|---|
+| **LoRa** (this project) | Chirp spread spectrum | ~1–12 KB/s | km-scale (up to ~10–15+ km) | Max range at min power; obstructed links; battery |
+| **SiK / FSK** (RFD900x) | (G)FSK | ~2–250 kbps | few km (40+ km best-case) | Higher-rate P2P with a power budget; FHSS telemetry |
+| **Wi-Fi HaLow** (802.11ah) | OFDM, sub-GHz | ~1–15 Mbps | ~1 km+ | Mbps sub-GHz at ~km, with an IP stack |
+
+Full comparison — the trade-offs, licensing, honorable mentions (CC1200, BLE
+Coded PHY), and the low-power future — is in
+[docs/HW_ALTERNATIVES.md](./docs/HW_ALTERNATIVES.md).
+
 ## Background Story
 
 This project started as a fun experiment to see if I could get two SX1262
 LoRa boards to talk to each other using custom firmware. I had played with
 [Meshtastic](https://meshtastic.org/) quite a bit but in my area (Taiwan) there
 wasn't much traffic and it was not too interesting (see
-[ALTERNATIVES.md](./docs/ALTERNATIVES.md) for how this project compares).
+[SW_ALTERNATIVES.md](./docs/SW_ALTERNATIVES.md) for how this project compares).
 The 'more interesting' application (to me) was to remotely connect
 to a machine (tty) long distances to remotely administer or run applications at
 modem speeds. I even thought about running a BBS on it for giggles.
@@ -194,17 +211,32 @@ help you build up this file (and it can also reference other files if you want t
 it up).
 
 ## Docs
-- [RADIO_BASICS](./docs/RADIO_BASICS.md) (newcomer primer)
+
+*Start here*
+- [RADIO_BASICS](./docs/RADIO_BASICS.md) (newcomer primer — dBm, SF, what LoRa is)
 - [HOW_IT_WORKS](./docs/HOW_IT_WORKS.md) (technical deep-dive)
 - [CAPABILITIES_JOURNEY](./docs/CAPABILITIES_JOURNEY.md) — what it can do **and the journey of problems we hit and solved** getting there
+
+*Design & protocol*
 - [DESIGN](./docs/DESIGN.md) (transport spec)
 - [MODE_SWITCH_SPEC](./docs/MODE_SWITCH_SPEC.md) (the runtime mode-switch state machine, formally model-checked)
-- [SECURITY](./docs/SECURITY.md)
-- [THROUGHPUT](./docs/THROUGHPUT.md)
-- [DIAGNOSTICS](./docs/DIAGNOSTICS.md)
+- [INTERRUPT_RX](./docs/INTERRUPT_RX.md) (the interrupt-driven RX design)
+- [RADIO_ERRATA](./docs/RADIO_ERRATA.md) (SX126x errata + workarounds)
+- [FUTURE_MODES](./docs/FUTURE_MODES.md) (auto/ADR, GFSK ludicrous, CAD — advanced modes)
+- [SECURITY](./docs/SECURITY.md) (crypto design — Ascon AEAD, X25519, forward secrecy)
+- [RESEARCH](./docs/RESEARCH.md) (design reasoning + references)
+
+*Performance & operations*
+- [THROUGHPUT](./docs/THROUGHPUT.md) (measured speeds + range per mode)
+- [DIAGNOSTICS](./docs/DIAGNOSTICS.md) (AT+DIAG fields, metrics, crash tools)
 - [DEBUGGING](./docs/DEBUGGING.md) (crash tools + worked walkthrough)
-- [ALTERNATIVES](./docs/ALTERNATIVES.md) (vs Reticulum/Meshtastic/SparkFun)
+- [TESTING](./docs/TESTING.md) (how the sim models hardware; test coverage)
+
+*Comparisons, roadmap & standards*
+- [HW_ALTERNATIVES](./docs/HW_ALTERNATIVES.md) (other radios: LoRa vs SiK vs Wi-Fi HaLow)
+- [SW_ALTERNATIVES](./docs/SW_ALTERNATIVES.md) (vs Reticulum/Meshtastic/SparkFun)
 - [ROADMAP](./docs/ROADMAP.md) (maturity plan)
+- [CODING_STANDARDS](./docs/CODING_STANDARDS.md) (the full coding-standards rationale)
 
 ## Quick start (build → flash → use)
 
@@ -284,7 +316,7 @@ to the LoRa PHY ceiling for the 2-node case and stay far simpler.
   LoRa shell. More capable in general; heavier for pure point-to-point. If you want a
   secure mesh, use it.
 - **This** → the lean, owned, P2P reliable serial link. See
-  [ALTERNATIVES.md](./docs/ALTERNATIVES.md) (prior art + head-to-head),
+  [SW_ALTERNATIVES.md](./docs/SW_ALTERNATIVES.md) (prior art + head-to-head),
   [DESIGN.md](./docs/DESIGN.md) (transport spec), and [RESEARCH.md](./docs/RESEARCH.md)
   (techniques surveyed and chosen).
 

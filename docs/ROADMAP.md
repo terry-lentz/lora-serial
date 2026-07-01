@@ -3,7 +3,7 @@
 Where this project stands today, how it compares to the closest existing product
 ([SparkFun LoRaSerial](https://github.com/sparkfun/SparkFun_LoRaSerial)), and the
 concrete work left to make it a *mature*, publishable project. Companion to
-[ALTERNATIVES.md](./ALTERNATIVES.md) (the broader landscape: Reticulum, Meshtastic).
+[SW_ALTERNATIVES.md](./SW_ALTERNATIVES.md) (the broader landscape: Reticulum, Meshtastic).
 
 ## Closest sibling: SparkFun LoRaSerial
 
