@@ -64,20 +64,19 @@ encryption, and on-device diagnostics. The headlines, and the depth under each:
 - ⚡ **Speed vs. range on the fly** — retune the radio at runtime, no reflash.
   - Six modes from **turbo** (SF5) to **far** (SF12), plus an experimental
     **ludicrous** GFSK mode; `AT+MODE=<name>` switches both ends together.
-  - **`AT+MODE=auto` is ADR** (adaptive data rate): a loss-aware engine that
-    picks the fastest mode the link's SNR *and* retransmit rate will carry, and
-    steps down for range on its own (optionally including the GFSK mode,
-    `AT+ADRGFSK`). ADR shines for **interactive / changing-range** use; for a
-    **sustained max-rate bulk transfer, pin a fixed mode** (`AT+FMODE=turbo`) —
-    a mode switch under heavy load can intermittently deep-deaf the SX1262 until
-    a recovery reboot, so ADR + the GFSK rung are opt-in/experimental for bulk
-    (see [journey entry 28](./docs/CAPABILITIES_JOURNEY.md)). A fixed mode
-    carries 1 MB byte-exact (turbo: 3.9 KB/s, hardware-validated).
+  - **`AT+MODE=auto` is ADR** (adaptive data rate), **on by default**: a
+    loss-aware engine that picks the fastest mode the link's SNR *and*
+    retransmit rate will carry, and steps down for range on its own. It now
+    carries sustained bulk byte-exact too — an earlier bulk-transfer wedge
+    turned out to be a software throttle in the RX task, since fixed
+    ([journey entry 29](./docs/CAPABILITIES_JOURNEY.md)). Pin a fixed mode with
+    `AT+MODE=<name>` to opt out.
   - **Auto-power** (`AT+APWR`) trims each side's TX power to what the peer's
-    signal report says the link needs, and is **on by default** — together
-    with compression and encryption, at a fixed `medium` mode, that's the
-    stable out-of-the-box setup. **ADR and the GFSK rung stay off by default**
-    (opt in with `AT+MODE=auto` / `AT+ADRGFSK=1`).
+    signal report says the link needs. So out of the box a board runs
+    **compression + encryption + auto-power + ADR** — a self-tuning, encrypted
+    link with zero setup. Only the GFSK **`ludicrous`** rung stays opt-in
+    (`AT+ADRGFSK=1`): the fastest rung, but short-range and pending field-range
+    validation.
   - Tune frequency (`AT+FREQ`), sync word (`AT+SYNC`), TX power (`AT+PWR`), and
     inter-frame gap (`AT+TXGAP`) live — set the carrier for your region
     (see the **Regulatory** section below).
@@ -483,7 +482,7 @@ Like a Hayes dial-up modem, the transparent serial build (`*_raw`) understands a
    | `AT+MODE?` | show current range/speed mode + the available presets |
    | `AT+MODE=<name>` | pin a fixed mode and **coordinate the peer**: `turbo` (SF5/500) · `fast` (SF7/500) · `medium` (SF7/250) · `slow` (SF9/125) · `far` (SF12/125) · `ludicrous` (GFSK). Run on the **initiator**; it switches both ends via a make-before-break handshake (the responder follows). Timing auto-derives from the mode. |
    | `AT+FMODE=<name>` | **force** this mode locally only (no peer coordination). Use to set both ends manually (run it on each) or to recover a mismatched pair. |
-   | `AT+MODE=auto` | **adaptive data rate** — the initiator measures link SNR **and the live retransmit rate** and *coordinates both ends* to the fastest mode the link sustains (responder follows; handshake with auto-revert, plus a dead-link rendezvous to recover any mismatch). Climbs `far`…`turbo`; steps up to GFSK `ludicrous` on a strong, close-range link (`AT+ADRGFSK=1`). Run on the initiator. *Coordination under heavy lossy load is still being hardened — for guaranteed reliability, pin a fixed mode.* |
+   | `AT+MODE=auto` | **adaptive data rate** — the initiator measures link SNR **and the live retransmit rate** and *coordinates both ends* to the fastest mode the link sustains (responder follows; handshake with auto-revert, plus a dead-link rendezvous to recover any mismatch). Climbs `far`…`turbo`; steps up to GFSK `ludicrous` on a strong, close-range link (`AT+ADRGFSK=1`). Run on the initiator. **On by default**; carries sustained bulk byte-exact (the old heavy-load wedge was an RX-task throttle, fixed — [journey 29](./docs/CAPABILITIES_JOURNEY.md)). Pin a fixed mode with `AT+MODE=<name>` to opt out. |
    | `AT+PWR=n` | set TX power to `n` dBm (fixed unless auto-power is on) |
    | `AT+APWR=0\|1` / `AT+APWR?` | toggle **auto TX-power** control. **On by default** — a peer-SNR feedback loop holds each side's TX power a margin above the mode's demod floor; set `AT+APWR=0` to pin fixed power. See [THROUGHPUT.md](./docs/THROUGHPUT.md). |
    | `AT+ADDR=n` / `AT+PEER=n` | *(advanced/legacy)* override the link address — normally **auto-elected from the MAC** at boot, so you don't set these. |
@@ -669,7 +668,7 @@ Picking a legal *frequency* is only half of it: regulators also cap the
 - **EU / UK (ETSI EN 300 220):** 868 MHz is narrow-channelized — **500 kHz is
   not permitted**; stay ≤ 250 kHz.
 
-> ⚠️ **Auto mode + Taiwan.** With `AT+MODE=auto` (ADR, **off by default**) the
+> ⚠️ **Auto mode + Taiwan.** With `AT+MODE=auto` (ADR, **on by default**) the
 > link *automatically* climbs into `turbo`/`ludicrous` on a strong (close-range)
 > link — i.e. into the wide bandwidths that are **outside** Taiwan's plan. For a
 > Taiwan deployment, either pin a compliant mode (`AT+MODE=medium` then `AT&W`)

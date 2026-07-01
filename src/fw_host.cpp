@@ -739,7 +739,7 @@ void Host::AtExec(char* line) {
     // Generates <kb> KB internally, measures link drain rate; set AT+SINK=1 on
     // the peer so it absorbs the data. Reports KB/s + retx + snr/rssi/pwr.
     else if (sscanf(line, "AT+SPEEDTEST=%d", &v) == 1) {
-        if (v < 1) v = 1; if (v > 256) v = 256;       // clamp 1..256 KB
+        if (v < 1) v = 1; if (v > 4096) v = 4096;    // clamp 1..4096 KB (4 MB)
         StartSpeedTest((uint32_t)v * 1024);
     }
     // AT+SINK=0|1 — drain+discard received data (no host needed at this end).
@@ -941,16 +941,14 @@ void Host::HostDeliver(const uint8_t* buf, uint16_t len) {
 // The control law lives in lib/linklayer/autopower.h, shared verbatim with the
 // sim (one source of truth).
 void Host::AdjustTxPower() {
-    // OPT-IN only (FEAT_APWR), OFF by default pending hardware validation. With
-    // it off, power stays fixed at g_radio.tx_power() (AT+PWR sets it).
+    // Gated on FEAT_APWR (ON by default; AT+APWR toggles). With it off, power
+    // stays fixed at g_radio.tx_power() (AT+PWR sets it).
     if (!(cfg.feat & FEAT_APWR)) return;
-    // Auto-power is for a PINNED mode only. Under ADR ('auto') it FIGHTS the
-    // mode controller: it minimizes power for the CURRENT (slow) mode, then ADR
-    // climbs to a faster, power-hungrier mode the now-too-low power can't
-    // sustain -> the link goes deaf on the switch (traced: power driven to
-    // -6 dBm, then a climb to GFSK froze RX). Under ADR, hold power and let ADR
-    // optimize via mode, not power.
-    if (cfg.feat & FEAT_ADR) return;
+    // (Auto-power once fought ADR — it floored power for a slow mode, then ADR
+    // climbed to a power-hungrier one and the link went deaf on the switch, so
+    // it was disabled under ADR. That "deaf" was largely the RX-throttle
+    // regression (entry 29); auto-power now runs under ADR too and adapts power
+    // as ADR adapts mode. GFSK still holds fixed power — see below.)
     // GFSK ('ludicrous') has no spreading gain, so it's far more sensitive to a
     // power change than LoRa — a step could push it below its demod margin (or,
     // at very close range, into saturation) and trip a loss storm. Leave GFSK's

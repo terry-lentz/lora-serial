@@ -577,10 +577,8 @@ void Radio::RadioTask(void*) {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);   // wait for a DIO1 event
         bool read_failed = false;   // RX_DONE fired but the read didn't succeed
-        bool handled_rx = false;    // this wake processed a real RX_DONE
         g_radio.Lock();
         if (radio.checkIrq(RADIOLIB_IRQ_RX_DONE) > 0) {   // real RX, not TxDone
-            handled_rx = true;
             uint8_t fr[link_layer::MAXFRAME];
             size_t len = radio.getPacketLength();
             if (len > sizeof fr) len = sizeof fr;
@@ -596,42 +594,39 @@ void Radio::RadioTask(void*) {
                                                       // the lock
                 g_radio.rx_ring_.Push(fr, len);   // dropped if full -> ARQ
                                                   // resends it
+                consec_fail = 0;   // a real frame -> not a deaf-radio storm
             } else {
                 read_failed = true;   // CRC fail / garbage / wedged radio
             }
             // Re-arm RX for the next frame (standby first to reset the AGC
             // between frames — cheap insurance against the desense errata).
-            // Only when RX is meant to be active (rx_armed_): during a TX,
-            // Tx() clears it and owns the radio under this same mutex, so we
-            // must not stomp the TX. This runs AFTER a completed RX_DONE, so
-            // it never aborts an in-flight frame (the old idle-timeout bug).
+            // Continuous RX for BOTH PHYs: draining + re-arming with no delay
+            // is what catches GFSK's back-to-back burst frames (the proven
+            // ludicrous-bulk path). Only when RX is meant to be active
+            // (rx_armed_): during a TX, Tx() clears it and owns the radio under
+            // this same mutex, so we must not stomp the TX. Runs AFTER a
+            // completed RX_DONE, so it never aborts an in-flight frame.
             if (g_radio.rx_armed_) { radio.standby(); radio.startReceive(); }
         }
         g_radio.Unlock();
         g_dbg_rx = '.';   // RX task done handling (idle, not in readData)
-        // Anti-starvation + storm-breaker. This task runs at HIGHER priority
-        // than the loop, so if RX_DONE floods — a fast, sensitive mode after a
-        // switch demodulating noise into "packets", whether they then pass CRC
-        // (and the link layer rejects them) or fail it — an un-throttled spin
-        // re-grabs the radio mutex faster than the loop can and starves it past
-        // the 5 s task-watchdog before the loop's recovery runs (the breadcrumb
-        // caught it: wedgeop=d). So yield ONE tick after every processed
-        // RX_DONE: this caps the task near 1 kHz and always hands the loop a
-        // slice. It's effectively free for real traffic — even turbo is well
-        // under 1 kHz, so the yield is absorbed in the idle gap before the next
-        // frame — and only throttles a pathological flood. A wake with no
-        // RX_DONE (a TxDone edge) never delays, so TX is unaffected. On a
-        // SUSTAINED run of FAILED reads (a truly wedged radio), additionally
-        // halt RX and back off longer for an uncontested recovery window.
+        // Deaf-radio backstop ONLY — deliberately NOT a per-frame throttle.
+        // The hot path above drains + re-arms with no delay: that is what lets
+        // GFSK's back-to-back burst frames through (a per-RX_DONE yield here
+        // gapped them and broke ludicrous). A genuinely wedged/deaf radio
+        // instead fires RX_DONE whose reads ALL fail with no real frame in
+        // between — a successful frame resets consec_fail, so ordinary GFSK
+        // noise (which mostly passes CRC) never trips this. After enough
+        // consecutive failures halt RX briefly for an uncontested window so the
+        // loop's stuck-radio recovery can run, then re-arm. The loop stays fed
+        // via its own Rx() pop path (feedLoopWDT there), not a yield here.
         if (read_failed && ++consec_fail >= kRxStormFails) {
             consec_fail = 0;
+            g_radio.Lock(); radio.standby(); g_radio.Unlock();
+            vTaskDelay(pdMS_TO_TICKS(kRxStormBackoffMs));   // loop's window
             g_radio.Lock();
-            radio.standby();   // halt the RX_DONE flood under the lock
+            if (g_radio.rx_armed_) radio.startReceive();    // resume RX
             g_radio.Unlock();
-            vTaskDelay(pdMS_TO_TICKS(kRxStormBackoffMs));
-        } else if (handled_rx) {
-            if (!read_failed) consec_fail = 0;
-            vTaskDelay(1);
         }
     }
 }
