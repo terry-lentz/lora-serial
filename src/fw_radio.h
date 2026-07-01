@@ -300,6 +300,21 @@ class Radio {
   int snr_floor() const;
 
   /**
+   * @brief Demod floor (dB) of the LoRa rung one faster than the current mode.
+   *
+   * For coordinated auto-power headroom under ADR: the loop targets this so it
+   * holds enough SNR for ADR to climb, instead of minimizing for the current
+   * mode (see link_layer::AutoPowerTargetFloor). There is no faster rung when
+   * already on the fastest LoRa preset (turbo) or on GFSK/custom — then this
+   * returns false and out_floor is left untouched.
+   *
+   * @param[out] out_floor set to the next-faster rung's floor (dB) when one
+   *                       exists; unchanged otherwise.
+   * @return true if a faster LoRa rung exists (out_floor valid), else false.
+   */
+  bool next_faster_snr_floor(int& out_floor) const;
+
+  /**
    * @brief Re-apply the shared post-begin() radio setup that any
    *        begin()/beginFSK() resets: RF switch, DIO1 IRQ, optional LoRa CRC,
    *        and the bounded SPI BUSY-line timeout. Call after every begin()

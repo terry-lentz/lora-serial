@@ -958,8 +958,16 @@ void Host::AdjustTxPower() {
     // 0 until the peer's first report arrives, which makes the margin ~= -floor
     // (negative) -> the loop holds power, which is harmless.
     int peer_snr = (int8_t)g_link.AuxRx();
+    // Which floor to hold our margin above: under ADR ('auto') aim a rung ahead
+    // so the mode controller can climb (otherwise we minimize power for the
+    // current mode and strand ADR a rung low); a pinned mode minimizes for
+    // itself. The policy is one source of truth in autopower.h.
+    int next_floor = 0;
+    bool has_faster = g_radio.next_faster_snr_floor(next_floor);
+    int floor = link_layer::AutoPowerTargetFloor(
+        (cfg.feat & FEAT_ADR) != 0, g_radio.snr_floor(), next_floor,
+        has_faster);
     int8_t p = link_layer::AutoPowerStep(g_radio.tx_power(), peer_snr,
-                                         g_radio.snr_floor(),
-                                         kApPwrFloorDbm, kTxPowerDbm);
+                                         floor, kApPwrFloorDbm, kTxPowerDbm);
     if (p != g_radio.tx_power()) g_radio.SetTxPower(p);
 }
