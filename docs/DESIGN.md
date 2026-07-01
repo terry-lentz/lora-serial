@@ -132,7 +132,7 @@ modulation entirely. It is the fastest rung (~12 KB/s on the bench, beating
 retx and is only entered from `turbo`. Because GFSK and LoRa are different PHYs,
 entering/leaving it is just another target of the same mode-switch handshake — the
 link layer above (ARQ, SACK, AEAD, framing) is identical on both PHYs. GFSK in
-`auto` is opt-in via `AT+ADRGFSK=1` (default-on in the shipped firmware). The
+`auto` is opt-in via `AT+ADRGFSK=1` (off by default in the shipped firmware). The
 throughput journey that got GFSK from below-`turbo` to fastest-rung (fast
 retransmit on SACK gaps was the key fix) is written up in
 [FUTURE_MODES.md](./FUTURE_MODES.md).

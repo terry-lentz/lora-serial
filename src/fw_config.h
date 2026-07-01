@@ -49,14 +49,14 @@ inline float BwFromCode(uint8_t code) {
  */
 #define FEAT_FS   0x20
 /**
- * @brief Auto TX-power control (opt-in; OFF by default). The loop is now
+ * @brief Auto TX-power control (ON by default). The loop is now
  *        PEER-SNR feedback: each side holds its own TX power so the SNR the
  *        peer reports for it (via the link's authenticated aux byte) stays a
  *        margin above the mode's demod floor. This fixes the asymmetric-link
  *        starvation of the former own-RSSI loop, which floored one side's power
  *        and deafened the peer on a path with unequal loss each way (sim:
  *        test_autopower_own_rssi_starves_asym vs test_autopower_peer_snr_*).
- *        Still off by default pending hardware validation; off => fixed power.
+ *        On by default now; AT+APWR=0 restores fixed power (see FEAT_DEFAULT).
  */
 #define FEAT_APWR 0x40
 
