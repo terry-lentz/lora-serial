@@ -315,6 +315,22 @@ int Radio::snr_floor() const {
     return (int)lroundf(kModeSnrFloor[i]);
 }
 
+// Next-faster LoRa rung's floor, for coordinated auto-power headroom under ADR
+// (see link_layer::AutoPowerTargetFloor). The LoRa presets run fastest-first
+// (turbo at index 0 .. far last), so the next-faster rung is index i-1; none
+// exists at turbo (i == 0) or GFSK/custom -> false. Round UP (ceilf, not the
+// lroundf snr_floor() uses): auto-power settles ~one margin above this target,
+// and ADR climbs off the exact float floor, so rounding up keeps the held
+// margin clear of the climb threshold.
+bool Radio::next_faster_snr_floor(int& out_floor) const {
+    const int kFloorCount =
+        (int)(sizeof(kModeSnrFloor) / sizeof(kModeSnrFloor[0]));
+    int i = const_cast<Radio*>(this)->CurrentModeIndex();
+    if (i <= 0 || i >= kFloorCount) return false;  // no faster / non-LoRa
+    out_floor = (int)ceilf(kModeSnrFloor[i - 1]);
+    return true;
+}
+
 bool Radio::ApplyModeByIndex(int idx) {
     if (idx < 0 || idx >= RfModeCount()) return false;
     if (kRfModes[idx].fsk) {

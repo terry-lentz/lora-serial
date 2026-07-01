@@ -999,6 +999,98 @@ void test_autopower_own_rssi_ok_when_symmetric() {
         "symmetric link should stay up even with the own-rssi loop");
 }
 
+// ===========================================================================
+// COORDINATED HEADROOM: auto-power + ADR together. Auto-power alone minimizes
+// power for the CURRENT mode; under ADR that strands the mode controller a rung
+// low, because the loop never holds enough SNR to clear the NEXT rung's floor +
+// margin. AutoPowerTargetFloor fixes it: under ADR, target the next-faster
+// rung's floor so ADR can climb, ratcheting power up rung by rung. This closed
+// loop (ADR picks the mode, auto-power sets the power, on a fixed channel where
+// SNR = power - path) proves the new policy reaches the fast end and the old
+// current-floor policy parks low. Mirrors fw_host.cpp AdjustTxPower +
+// Radio::next_faster_snr_floor (which the firmware, not built natively, wires).
+// ===========================================================================
+
+/**
+ * @brief The sim's mirror of Radio::next_faster_snr_floor (LoRa fastest-first).
+ *
+ * @param[in]  mode      current mode index into kModes.
+ * @param[out] out_floor next-faster LoRa rung's floor (dB) when one exists.
+ * @return true if a faster LoRa rung exists (out_floor valid), else false.
+ */
+static bool sim_next_faster_floor(int mode, int* out_floor) {
+    // kModes runs turbo(0)..far(4) then GFSK(5); the next-faster rung is
+    // mode-1, and only turbo..far (1..4) have a faster LoRa rung above them.
+    // Round UP (ceilf), mirroring Radio::next_faster_snr_floor, so the held
+    // margin clears ADR's climb threshold (which uses the exact float floor).
+    if (mode <= 0 || mode >= 5) return false;
+    *out_floor = (int)ceilf(kModes[mode - 1].snr_floor);
+    return true;
+}
+
+/**
+ * @brief Run the coupled ADR + auto-power loop to equilibrium on a fixed
+ *        channel and return the mode it settles on.
+ *
+ * Channel: the SNR each end measures = tx_power - path (a strong link = a small
+ * path). Each tick ADR picks the mode from the measured SNR, then auto-power
+ * nudges power toward the target floor — the next-faster rung's floor when
+ * `coordinated`, else the current mode's floor (the old policy).
+ *
+ * @param[in]  coordinated use the next-rung headroom policy (vs current-floor).
+ * @param[in]  path        channel path loss (dB): SNR = tx_power - path.
+ * @param[in]  start_mode  the mode index to start from (e.g. far).
+ * @param[out] out_tx      the final TX power (dBm).
+ * @return the mode index the loop settles on.
+ */
+static int run_coord_climb(bool coordinated, int path, int start_mode,
+                           int* out_tx) {
+    link_layer::AdrController adr;
+    build_ladder(adr);                      // sim mode ladder + ADR timers
+    int mode = start_mode, tx = kPwrFloor;  // start power-minimized (the bug)
+    uint32_t now = 0;
+    for (int t = 0; t < 400; t++) {
+        now += adr.cfg.period_ms;
+        int snr = tx - path;                // symmetric channel
+        link_layer::AdrController::In in;
+        in.now = now; in.busy = false; in.have_link = true;
+        in.cur = mode; in.snr = (float)snr; in.rssi = -80.0f; in.retx_pct = 0;
+        link_layer::AdrAction a = adr.Decide(in);
+        if (a.kind == link_layer::ADR_REQUEST) mode = a.mode;
+        int nf = 0; bool hf = sim_next_faster_floor(mode, &nf);
+        int floor = link_layer::AutoPowerTargetFloor(
+            coordinated, (int)lroundf(kModes[mode].snr_floor), nf, hf);
+        ap_peer_snr(&tx, snr, floor);       // symmetric: peer hears us at snr
+    }
+    if (out_tx) *out_tx = tx;
+    return mode;
+}
+
+/**
+ * @brief Teeth: coordinated headroom lets ADR climb to the fast end; the old
+ *        current-floor policy strands it on the robust rung.
+ *
+ * Same channel and start (far, power-minimized) both ways — only the floor
+ * policy differs — so the mode divergence is the fix, nothing else.
+ */
+void test_sim_adr_autopower_coordinated_climbs() {
+    int coord_tx = 0, base_tx = 0;
+    // Start on far (mode 4); the channel (path 14 dB) reaches turbo only with
+    // power headroom held for the next rung.
+    int m_coord = run_coord_climb(true,  14, 4, &coord_tx);
+    int m_base  = run_coord_climb(false, 14, 4, &base_tx);
+    printf("  [coord: mode=%d tx=%d | base: mode=%d tx=%d]\n",
+           m_coord, coord_tx, m_base, base_tx);
+    TEST_ASSERT_TRUE_MESSAGE(m_coord < m_base,
+        "coordinated headroom must reach a faster mode than the old policy");
+    TEST_ASSERT_TRUE_MESSAGE(m_coord <= 1,
+        "coordinated headroom should ratchet ADR up to the fast end");
+    TEST_ASSERT_TRUE_MESSAGE(m_base >= 3,
+        "the old current-floor policy strands ADR on a robust rung");
+    TEST_ASSERT_TRUE_MESSAGE(coord_tx >= kPwrFloor && coord_tx <= kPwrMax,
+        "TX power stays within bounds");
+}
+
 /**
  * @brief A HARD wedge a begin()-only re-init can't clear is recovered by the
  *        last-resort no-progress REBOOT, and the stream survives byte-exact.
@@ -1234,5 +1326,6 @@ int main() {
     RUN_TEST(test_autopower_fixed_holds_asym);
     RUN_TEST(test_autopower_peer_snr_holds_asym);
     RUN_TEST(test_autopower_own_rssi_ok_when_symmetric);
+    RUN_TEST(test_sim_adr_autopower_coordinated_climbs);
     return UNITY_END();
 }

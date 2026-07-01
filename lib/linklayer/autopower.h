@@ -80,6 +80,31 @@ inline int8_t AutoPowerStep(int8_t cur_tx, int peer_snr, int snr_floor,
 }
 
 /**
+ * @brief Pick the demod floor the auto-power loop should hold its margin above.
+ *
+ * With a PINNED mode (ADR off) — or already on the top rung — minimize power
+ * for the current mode: aim at its own floor. But when ADR ('auto') is driving
+ * the mode, minimizing for the current mode STARVES ADR of the SNR it needs to
+ * climb: the loop would hold power just above the current floor, never clearing
+ * the next rung's floor + margin, so ADR parks a rung low. When ADR is active
+ * and a faster rung exists, aim a rung ahead — target that next-faster rung's
+ * floor. The loop then holds enough headroom for ADR to step up, and ratchets
+ * power up rung by rung until the link tops out: low power AND full throughput,
+ * not one traded for the other. See docs/CAPABILITIES_JOURNEY.md entry 31.
+ *
+ * @param[in] adr_active  is ADR ('auto') currently choosing the mode?
+ * @param[in] cur_floor   the current mode's demod floor (dB).
+ * @param[in] next_floor  the next-faster rung's floor (dB); consulted only when
+ *                        adr_active and has_faster are both true.
+ * @param[in] has_faster  is there a faster rung above the current one?
+ * @return the demod floor to pass to AutoPowerStep().
+ */
+inline int AutoPowerTargetFloor(bool adr_active, int cur_floor, int next_floor,
+                                bool has_faster) {
+    return (adr_active && has_faster) ? next_floor : cur_floor;
+}
+
+/**
  * @brief Quantize a measured SNR into the link's 1-byte telemetry value.
  *
  * The aux byte carries a signed dB SNR; round to the nearest integer and clamp
