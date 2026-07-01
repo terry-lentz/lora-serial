@@ -14,6 +14,7 @@
 
 #include <cstring>
 
+#include "esp32-hal-tinyusb.h"  // tud_cdc_write: device->host output w/o DTR
 #include "esp_heap_caps.h"   // internal-SRAM heap metric for AT+LINK?
 
 #include "autopower.h"  // link_layer::AutoPowerStep — peer-SNR power loop
@@ -377,17 +378,25 @@ void   Host::HtPush(const uint8_t* b, size_t n) {  // caller: HtFree() >= n
     }
 }
 void Host::HostTxDrain() {
-    int room = HOSTPORT.availableForWrite();
+    // Device->host output goes via TinyUSB directly, NOT Serial.write(): the
+    // Arduino USB-CDC layer returns 0 from both write() and availableForWrite()
+    // whenever the host hasn't asserted DTR (they gate on tud_cdc_connected()).
+    // Some hosts open the port and READ without ever raising DTR — notably
+    // several Android serial apps — which starved device->host output entirely
+    // (the link looked one-way). tud_cdc_write() buffers into the CDC FIFO
+    // regardless of DTR; the host receives it the moment it reads. (issue #3)
+    uint32_t room = tud_cdc_write_available();
     while (room > 0 && HtCount() > 0) {
         size_t contig = (ht_head_ >= ht_tail_) ? (ht_head_ - ht_tail_)
                                           : (sizeof(host_tx_) - ht_tail_);
         size_t chunk  = contig < (size_t)room ? contig : (size_t)room;
         // bounded by room -> won't block
-        size_t w = HOSTPORT.write(host_tx_ + ht_tail_, chunk);
+        uint32_t w = tud_cdc_write(host_tx_ + ht_tail_, (uint32_t)chunk);
         ht_tail_ = (ht_tail_ + w) % sizeof(host_tx_);
         if (w < chunk) break;
-        room -= (int)w;
+        room -= w;
     }
+    tud_cdc_write_flush();   // push the FIFO to the host (Serial.write did too)
 }
 
 // Discard any buffered host-bound output when a host (re)connects, so a
