@@ -259,6 +259,15 @@ The user expects this by default — don't wait to be asked.
 When a change adds a recovery mechanism, mode, AT command, or protocol field,
 find every doc that mentions the area and update it; don't leave a stale claim.
 
+**Docs state the PRESENT, not the journey.** A standalone doc (`SECURITY.md`,
+`DESIGN.md`, `THROUGHPUT.md`, …) describes what the system does *now*,
+matter-of-fact — not the story of how it got there. An old design, the bugs hit,
+and the sequence of fixes belong in `docs/CAPABILITIES_JOURNEY.md`; reference it,
+don't retell it. So: no "Fix A / Fix B", no "the old design did X, now we do Y",
+and never a present-tense description of a bug that's already fixed — a reader
+must not mistake resolved history for the current state. This is rule 4's "state
+the PRESENT, not the past" applied to whole documents.
+
 ## Reusable tools — no one-off helpers
 
 When you need a helper (an AT runner, a throughput test, a flasher, a log
