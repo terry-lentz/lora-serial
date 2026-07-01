@@ -17,7 +17,7 @@ serial port that happens to be a long-range radio.
 
 ## Get it — flash a prebuilt release (no build needed)
 
-[![Latest release](https://img.shields.io/github/v/release/terry-lentz/lora-serial?label=latest)](https://github.com/terry-lentz/lora-serial/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/terry-lentz/lora-serial?sort=semver&label=latest)](https://github.com/terry-lentz/lora-serial/releases/latest)
 
 Don't want to build from source? Grab the latest release and flash both boards —
 no toolchain required. Both boards run the **same image** and auto-elect their
