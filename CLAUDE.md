@@ -273,7 +273,8 @@ only exception is something genuinely niche we'll never repeat. The rule:
   bug to fix, not a reason to rewrite a one-off.
 
 Current catalog: `upload_flash.sh`, `coredump.sh`, `at.py`, `lora_xfer.py`,
-`loraserial.py` — see `tools/README.md`.
+`loraserial.py`, `version.py` (build-time version stamp) — see
+`tools/README.md`.
 
 ## Hardware guardrails
 

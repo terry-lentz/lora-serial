@@ -23,6 +23,15 @@
 // 1-byte addresses are auto-elected from the chip MACs (+ proximity pairing),
 // so there is no per-board build. Build/flash with the single `node_raw` env.
 
+// Firmware version — the single source of truth for "which release is this?".
+// tools/version.py injects -D FW_VERSION="<git describe>" at build time (the
+// exact tag on a release build, e.g. v0.2.0, or v0.2.0-3-gabc1234 on a dev
+// build past the tag). This default covers a build with no git metadata. It is
+// reported by ATI (fw=...), AT+VER, and the USB boot banner.
+#ifndef FW_VERSION
+#define FW_VERSION "dev"   ///< overridden by tools/version.py at build time
+#endif
+
 /**
  * @brief Map a compact 1-byte bandwidth code to its bandwidth in kHz.
  *

@@ -12,6 +12,7 @@ capability one of these almost has, add it here rather than starting fresh.
 | `at.py <port> <cmd> ...` | Run AT commands (auto `+++` escape) and print the replies. `--until SUBSTR [--timeout SEC]` waits for a delayed result (e.g. a slow-mode `AT+SPEEDTEST`). |
 | `lora_xfer.py <tx> <rx> <n>` | Throughput + byte-exactness test over the serial cable; can pin a mode first. |
 | `loraserial.py` | Shared Python lib (`Board` class) the two `.py` tools build on. |
+| `version.py` | PlatformIO **pre-build hook** (not run by hand): stamps the firmware with its version from `git describe` as `-D FW_VERSION`. Reported by `ATI` / `AT+VER` / the boot banner. |
 
 ## Examples
 

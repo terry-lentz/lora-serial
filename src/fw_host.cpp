@@ -524,11 +524,18 @@ void Host::AtExec(char* line) {
     else if (!strcmp(line, "ATI")) {
         snprintf(s, sizeof s,
                  "id=%s addr=%d peer=%d initiator=%d enc=%d tag=%d comp=%d "
-                 "state=%s\r\nOK\r\n",
+                 "state=%s fw=%s\r\nOK\r\n",
                  cfg.name, cfg.addr, cfg.peer, g_device.initiator(),
                  (cfg.feat & FEAT_ENC) ? 1 : 0, LINK_TAGLEN,
                  (cfg.feat & FEAT_COMP) ? 1 : 0,
-                 g_device.pairing() ? "pairing" : "ready");
+                 g_device.pairing() ? "pairing" : "ready", FW_VERSION);
+        AtReply(s);
+    }
+    // AT+VER / AT+VER? — report the firmware version. It is stamped in at build
+    // time from the git tag (tools/version.py), so it matches the release the
+    // board was flashed from. Read-only.
+    else if (!strcmp(line, "AT+VER") || !strcmp(line, "AT+VER?")) {
+        snprintf(s, sizeof s, "fw=%s\r\nOK\r\n", FW_VERSION);
         AtReply(s);
     }
     // AT+LINK? — live link diagnostics: smoothed RSSI/SNR, current TX power, TX
@@ -850,7 +857,7 @@ void Host::AtExec(char* line) {
     // AT? / AT$ — print the built-in command help (the list of supported AT
     // commands). Read-only.
     else if (!strcmp(line, "AT?") || !strcmp(line, "AT$")) {
-        AtReply("commands:\r\n ATI  AT+LINK?  AT+SESSION?  AT+DIAG  "
+        AtReply("commands:\r\n ATI  AT+VER  AT+LINK?  AT+SESSION?  AT+DIAG  "
                 "AT+CRASH=<panic|hang>\r\n AT+MODE? "
                 "AT+MODE=<turbo|fast|medium|slow|far|ludicrous|auto>\r\n");
         AtReply(" AT+FMODE=<name>(force local, no peer)\r\n"

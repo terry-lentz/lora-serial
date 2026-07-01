@@ -506,7 +506,8 @@ Like a Hayes dial-up modem, the transparent serial build (`*_raw`) understands a
    | Command | Effect |
    |---|---|
    | `AT` | `OK` (link check) |
-   | `ATI` | identity: name, address, peer, initiator role |
+   | `ATI` | identity: name, address, peer, initiator role, and `fw=` firmware version |
+   | `AT+VER` | firmware version (`fw=…`), stamped from the git tag at build time (`v0.2.0`, or `v0.2.0-3-gabc1234` on a dev build) |
    | `AT+LINK?` | live link state — `rssi`, `snr`, `pwr` (TX dBm), `txq` (queued), `hin`/`hout` (host bytes in/out), `ibuf` (ingest ring KB), `idrop` (overrun bytes), `tx`/`retx` (frames sent/resent), `heap` (free internal SRAM) |
    | `AT+SESSION?` | forward-secrecy status — `session` (1 = a per-session key is active), and a 2-byte fingerprint of the `static` vs `active` key (they differ once the handshake completes). |
    | `AT+DIAG` | crash & health report — boots, **why it last reset** (panic/brownout/watchdog/clean), uptime before that reset, free/min internal SRAM, core-dump presence. See [DIAGNOSTICS.md](./docs/DIAGNOSTICS.md). |
