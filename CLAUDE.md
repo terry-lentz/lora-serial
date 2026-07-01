@@ -205,6 +205,40 @@ method that has repeatedly caught real bugs before they reached hardware.
    firmware.elf that was running at the crash — don't rebuild between flashing
    and decoding or the app-SHA won't match.
 
+6. **The two-board bench — test real data flow on one host.** The fastest way
+   to reproduce and understand a *hardware* issue (mode switches, GFSK, a deaf
+   or rebooting radio) is two boards flashed with the same image, both plugged
+   into the same machine. They auto-elect their half-duplex roles from their
+   MACs, so each simply shows up as its own USB serial port and they form a
+   link with no per-board setup. This is the bench that found most of the hard
+   bugs — reach for it whenever the native sim can't reach the behavior (nothing
+   in `src/`, the radio/PHY glue, is built natively).
+
+   - **Find the boards.** `ls -l /dev/serial/by-id/` — each is
+     `usb-Open_LoRa-Serial_<MAC>-if00 -> ../../ttyACMn`. `ATI` on a port shows
+     its role (`initiator=0|1`), address, peer, and link state.
+   - **Drive each board** over its port with `tools/at.py <port> <cmd>…` (it
+     auto-enters AT mode via `+++`). Baseline a pair with
+     `tools/at.py <port> ATI "AT+MODE?" "AT+LINK?" AT+DIAG`.
+   - **Send data / measure throughput.** Run `AT+SPEEDTEST=<kb>` on the
+     **initiator**: the firmware generates incompressible data internally and
+     reports KB/s + retx, so no second host program is needed —
+     `tools/at.py <initiator> AT+SPEEDTEST=64 --until KB/s --timeout 120`. For a
+     byte-exact end-to-end check over the transparent transport, stream between
+     the two ports with `host/raw_verify.py` / `tools/lora_xfer.py`.
+   - **Exercise a scenario.** e.g. a mode switch: `AT+MODE=<name>` on the
+     **initiator** coordinates BOTH ends (the responder follows), then send
+     data. A `medium`→`ludicrous` switch followed by a speedtest is the GFSK
+     repro.
+   - **Read what broke.** `AT+DIAG` reports `boots`, the last reset reason, and
+     the `wedgeop`/`rxop` breadcrumbs — the radio op each task last entered
+     before a wedge (see the `RMARK` traces in `fw_radio.cpp` and the
+     `g_dbg_stage` marks in `fw_device.cpp`). `coredump=YES` means a crash dump
+     is saved; `tools/coredump.sh <env> <port>` pulls and decodes it.
+   - **Recover a wedged board.** A hard wedge won't answer AT (silent on
+     serial) — power-cycle it (unplug/replug USB, or the reset button); runtime
+     recovery only clears the softer, self-detected deaf-locks.
+
 ## Keep the docs in sync — every change updates the docs
 
 Docs are part of "done," not a later chore. **Every time we change behavior,

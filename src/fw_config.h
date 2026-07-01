@@ -97,17 +97,17 @@ static const uint8_t kLinkKey[16] = {
 #define NODE_NAME "node"     ///< default board name (NVS overrides)
 #endif
 // Beta defaults: a fresh / factory-reset board boots with COMPRESSION,
-// ENCRYPTION, and peer-SNR AUTO-POWER on, at the fixed 'medium' mode.
-// (Encryption uses the shared built-in key until AT+TRAIN / proximity pairing
-// derives a unique per-pair key; auto-power trims TX power to the peer's
-// reported demod headroom, validated byte-exact on a fixed mode.) ADR ('auto')
-// and the GFSK 'ludicrous' rung stay OPT-IN (AT+MODE=auto, AT+ADRGFSK=1): ADR
-// adapts the mode to changing range and works for interactive use, but a mode
-// switch under sustained bulk can deep-deaf the SX1262 until a recovery reboot
-// (docs/CAPABILITIES_JOURNEY.md entry 28), so pin a fixed mode (AT+FMODE=turbo/
-// fast) for big transfers.
+// ENCRYPTION, peer-SNR AUTO-POWER, and ADR ('auto') all on, starting at the
+// 'medium' LoRa mode. (Encryption uses the shared built-in key until AT+TRAIN /
+// proximity pairing derives a unique per-pair key; auto-power holds TX power to
+// the peer's reported demod headroom; ADR adapts the LoRa mode to the link's
+// SNR + retransmit rate.) ADR's old sustained-bulk wedge (entry 28) was a
+// software throttle in the RX task, fixed in entry 29 — ADR now carries bulk
+// byte-exact. Pin a fixed mode with AT+MODE=<name> to opt out. Only the GFSK
+// 'ludicrous' rung stays OPT-IN (AT+ADRGFSK=1): fastest but short-range and
+// RF-sensitive at close bench range, pending field-range validation.
 #ifndef FEAT_DEFAULT
-#define FEAT_DEFAULT (FEAT_COMP | FEAT_ENC | FEAT_APWR)  ///< beta default mask
+#define FEAT_DEFAULT (FEAT_COMP | FEAT_ENC | FEAT_APWR | FEAT_ADR)
 #endif
 
 // Fixed-mode config (radio defaults). Override at build time, e.g.

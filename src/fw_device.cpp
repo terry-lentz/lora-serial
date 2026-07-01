@@ -561,7 +561,11 @@ void Device::ServiceModeSwitch() {
 // a merely-lossy fixed fast link would wrongly drop the user's choice to medium
 // (see test/test_sim: test_sim_fixed_mode_holds_on_loss).
 void Device::MaybeRendezvous() {
-    if (!(cfg.feat & FEAT_ADR)) return;   // pinned mode: never auto-change
+    // Pinned mode never auto-changes — EXCEPT a pinned GFSK ('ludicrous') that
+    // went deaf: with no fallback the loop churns on futile GFSK re-inits and
+    // starves the host (a hard wedge), so let a deaf pinned GFSK rendezvous to
+    // medium too — it always recovers.
+    if (!(cfg.feat & FEAT_ADR) && !g_radio.phy_fsk()) return;
     uint32_t rz_ms = RecoveryMs(kRendezvousFloorMs, kRendezvousMult);
     if (millis() - last_rx_ms_ < rz_ms) return;          // silence
     if (millis() - last_rendezvous_ms_ < rz_ms) return;  // rate-limit
