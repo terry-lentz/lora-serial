@@ -316,6 +316,10 @@ void Device::Setup() {
 #endif  // MAC_ROLE
     BG("[BG] S5 setup DONE role=%d mode=%s\r\n",
        (int)initiator_, g_radio.CurrentModeName());
+    // Boot banner: announce the firmware version to the host once at startup,
+    // before any transparent data flows. Human-readable and one line (like the
+    // pairing banners), so a host connected at boot sees which build it's on.
+    g_host.Emit("[LoRa-Serial] " FW_VERSION "\r\n");
 }
 
 // --------------------------------------------------------------------------
