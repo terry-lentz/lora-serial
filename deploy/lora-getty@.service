@@ -1,0 +1,41 @@
+# lora-getty@.service — a respawning login console over the LoRa serial link.
+#
+# Unlike a one-shot `agetty`, this restarts after every logout, so the remote end
+# always gets a fresh `login:`. Templated on the tty name (instance = the port).
+#
+# Install on the host the board is plugged into (e.g. an Armbian SBC):
+#   sudo cp deploy/lora-getty@.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now lora-getty@ttyACM0      # <- your board's port
+#
+# Status / stop:
+#   systemctl status lora-getty@ttyACM0
+#   sudo systemctl disable --now lora-getty@ttyACM0
+#
+# Tip: for a stable name that survives replug/renumbering, use the udev rule in
+# deploy/99-lora.rules and enable lora-getty@lora instead of @ttyACM0.
+
+[Unit]
+Description=LoRa serial login console on %I
+Documentation=https://github.com/ (this repo) — README "login terminal"
+# Tie the console to the board being present: start when it appears, stop on unplug.
+BindsTo=dev-%i.device
+After=dev-%i.device
+
+[Service]
+# -L = local line: no carrier-detect / no auto-baud. Our link has no DCD wire, so
+# this is REQUIRED. 115200 is nominal (USB-CDC ignores it). vt100 = $TERM for login.
+ExecStart=-/sbin/agetty -L 115200 %I vt100
+Type=idle
+Restart=always
+RestartSec=1
+UtmpIdentifier=%I
+TTYPath=/dev/%I
+TTYReset=yes
+TTYVHangup=yes
+KillMode=process
+IgnoreSIGPIPE=no
+SendSIGHUP=yes
+
+[Install]
+WantedBy=multi-user.target
