@@ -447,10 +447,13 @@ void Device::LoopInitiator() {
     // committed us to a new mode.
     g_dbg_stage = 'H';   // wedge breadcrumb: post-turn host-pump section
     if (got_frame) g_modesw.AfterRecv(g_link.CtrlRx(), true, millis());
-    // Report how well we just heard the peer (their last frame's SNR) so the
-    // peer can hold its own TX power above our demod floor (peer-SNR
-    // auto-power). Always report, regardless of our own FEAT_APWR.
-    if (got_frame) g_link.SetAuxTx(link_layer::SnrToAux(g_radio.snr()));
+    // Report how well we heard the peer (peer-SNR auto-power). If we've heard
+    // nothing valid for a while, report "no signal" instead of a stale reading
+    // — carried even on a poll — so a deaf side tells the peer to get louder
+    // and the link re-establishes after a reboot (entry 32).
+    bool i_silent = (millis() - last_rx_ms_) > kApSilentMs;
+    g_link.SetAuxTx(link_layer::SnrToAux(
+        i_silent ? link_layer::kApNoSignalSnr : g_radio.snr()));
     ServiceModeSwitch();
     size_t rcvd = g_host.PumpLinkOut();
     if (rcvd > 0 || g_link.HasWork()) li_last_activity_ = millis();
@@ -503,10 +506,11 @@ void Device::LoopResponder() {
     // (so a mode-switch REQ is ACKed on our reply below). A received frame also
     // clears probation.
     g_modesw.AfterRecv(g_link.CtrlRx(), false, millis());
-    // Report how well we just heard the peer (their last frame's SNR) so the
-    // peer can hold its own TX power above our demod floor (peer-SNR
-    // auto-power). Always report, regardless of our own FEAT_APWR.
-    g_link.SetAuxTx(link_layer::SnrToAux(g_radio.snr()));
+    // Report how well we heard the peer (peer-SNR auto-power); "no signal" when
+    // we've heard nothing valid for a while, so the peer boosts to reach us.
+    bool r_silent = (millis() - last_rx_ms_) > kApSilentMs;
+    g_link.SetAuxTx(link_layer::SnrToAux(
+        r_silent ? link_layer::kApNoSignalSnr : g_radio.snr()));
     size_t got = g_host.PumpLinkOut();
     g_host.Poll();   // grab fresh host data before replying
     // If we just delivered data (e.g. a keystroke) AND our host is actively

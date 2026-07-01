@@ -149,6 +149,12 @@ static const uint16_t kPreamble     = 8;     ///< min-ish; shaves airtime/frame
 static const float    kTcxoV       = 1.8f;   ///< Wio-SX1262 TCXO on SX1262 DIO3
 /// configured MAX TX power (dBm); legal in TW (920-925: 27 dBm EIRP outdoor)
 static const int8_t   kTxPowerDbm = 22;
+/// No valid RX for this long (ms) => the link is silent. Auto-power then ramps
+/// our own TX power UP (fw_host) and reports "no signal" to the peer so it
+/// boosts too (fw_device) -- the two halves that re-establish a starved link
+/// after a reboot. Above the idle cadence (kIdleGapMax 1 s), below the 5 s
+/// radio-stuck floor, so normal chatter never trips it.
+static const uint32_t kApSilentMs = 3000;
 /**
  * @brief Proximity-pairing TX power (dBm): a deliberately LOW power used only
  *        during first-boot pairing so the link reaches only an ADJACENT board

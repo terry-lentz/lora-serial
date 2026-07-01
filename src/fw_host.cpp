@@ -974,7 +974,14 @@ void Host::AdjustTxPower() {
     int floor = link_layer::AutoPowerTargetFloor(
         (cfg.feat & FEAT_ADR) != 0, g_radio.snr_floor(), next_floor,
         has_faster);
+    // Link silent = no valid frame heard for a while. Then peer_snr is stale,
+    // and a power we eased DOWN last session may be why the peer can't hear us
+    // now (e.g. it rebooted); ramp UP toward max to re-establish instead of
+    // starving on an asymmetric path (entry 32). We ease down once two-way
+    // contact resumes.
+    bool link_silent = (millis() - g_device.last_rx_ms()) > kApSilentMs;
     int8_t p = link_layer::AutoPowerStep(g_radio.tx_power(), peer_snr,
-                                         floor, kApPwrFloorDbm, kTxPowerDbm);
+                                         floor, kApPwrFloorDbm, kTxPowerDbm,
+                                         link_silent);
     if (p != g_radio.tx_power()) g_radio.SetTxPower(p);
 }
