@@ -15,6 +15,25 @@ device into either end; **whatever you send comes out the other side, byte-exact
 kilometers away — with no special software on either host.** It's a transparent
 serial port that happens to be a long-range radio.
 
+## Get it — flash a prebuilt release (no build needed)
+
+[![Latest release](https://img.shields.io/github/v/release/terry-lentz/lora-serial?label=latest)](https://github.com/terry-lentz/lora-serial/releases/latest)
+
+Don't want to build from source? Grab the latest release and flash both boards —
+no toolchain required. Both boards run the **same image** and auto-elect their
+roles at boot.
+
+| Step | What to do |
+|---|---|
+| **1 · Download** | From the **[latest release](https://github.com/terry-lentz/lora-serial/releases/latest)**, download **`lora-serial-<version>.firmware.bin`** (the complete factory image). |
+| **2 · Flash each board** | Open the **[ESP web flasher](https://espressif.github.io/esptool-js/)**, connect a board, and flash that file at offset `0x0`. Repeat for the second board. |
+| **3 · Set the mode once** | In any serial terminal: type `+++`, then `AT+MODE=medium`, then `AT&W` (saved to NVS). |
+
+That's the whole setup — the two boards form an encrypted link. (`firmware.bin`
+is the full image that boots a blank chip; the release also ships an `app.bin`
+for OTA — see the release notes.) **Prefer to build from source?** See the
+**Quick start** section below.
+
 ## What you get
 
 Not a toy demo — a full transparent serial transport with its own

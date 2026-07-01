@@ -31,6 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
+          ver="${GITHUB_REF_NAME}"            # the release tag, e.g. v0.1.0
           for env in node_raw; do
             pio run -e "$env"
             d=".pio/build/$env"
@@ -42,42 +43,59 @@ jobs:
               echo "::error::boot_app0.bin not found under ~/.platformio/packages" >&2
               exit 1
             fi
-            # Single-file factory image: flash at 0x0 (esptool / ESP Web Tools).
-            esptool.py --chip esp32s3 merge_bin -o "dist/${env}.factory.bin" \
+            # Version-stamped names so a downloaded file is unambiguous.
+            # .firmware.bin = the complete factory image (flash at 0x0; boots a
+            # blank chip). .app.bin = the app partition only (OTA / advanced).
+            esptool.py --chip esp32s3 merge_bin \
+              -o "dist/lora-serial-${ver}.firmware.bin" \
               --flash_mode keep --flash_freq keep --flash_size keep \
               0x0 "$d/bootloader.bin" \
               0x8000 "$d/partitions.bin" \
               0xe000 "$BOOT_APP0" \
               0x10000 "$d/firmware.bin"
-            # Also ship the bare app image (for OTA / advanced flashing).
-            cp "$d/firmware.bin" "dist/${env}.app.bin"
+            cp "$d/firmware.bin" "dist/lora-serial-${ver}.app.bin"
           done
           (cd dist && sha256sum *.bin > SHA256SUMS.txt)
           ls -l dist
 
       - name: Flashing instructions (release body prefix)
         run: |
+          ver="${GITHUB_REF_NAME}"
           cat > RELEASE_BODY.md <<'EOF'
           ## Flash a board (no toolchain needed)
 
-          Both boards run the **same image** (`node_raw`) — flash it to each; they
-          auto-elect the half-duplex role from their chip MACs at boot, so there's
-          nothing per-board to set.
+          Both boards run the **same image** — flash it to each; they auto-elect
+          the half-duplex role from their chip MACs at boot, so there's nothing
+          per-board to set.
 
-          **Easiest — web flasher:** open https://espressif.github.io/esptool-js/, connect the
-          board, and flash `node_raw.factory.bin` at offset `0x0`.
+          ### Which download?
+
+          - **`lora-serial-__VERSION__.firmware.bin`** — the complete image
+            (bootloader + partition table + app) merged into one file. Flash at
+            `0x0`; self-contained, so it boots a blank chip. **Use this one**
+            unless you know you need the other.
+          - **`lora-serial-__VERSION__.app.bin`** — the application only (no
+            bootloader/partitions), for OTA or re-flashing just the app on a board
+            that already ran this firmware. Flash at `0x10000`; smaller, but it
+            won't boot a blank chip.
+          - **`SHA256SUMS.txt`** — checksums to verify your download.
+
+          **Easiest — web flasher:** open https://espressif.github.io/esptool-js/,
+          connect the board, and flash `lora-serial-__VERSION__.firmware.bin` at
+          offset `0x0`.
 
           **Or with esptool:**
           ```bash
-          esptool.py --chip esp32s3 write_flash 0x0 node_raw.factory.bin   # board 1
-          esptool.py --chip esp32s3 write_flash 0x0 node_raw.factory.bin   # board 2
+          esptool.py --chip esp32s3 write_flash 0x0 lora-serial-__VERSION__.firmware.bin
           ```
+          Flash the same file to each board.
 
           Then set the radio mode once (persists in NVS): `+++`, `AT+MODE=medium`, `AT&W`.
           See the README for modes, AT commands, and the login-terminal setup.
 
           ---
           EOF
+          sed -i "s/__VERSION__/${ver}/g" RELEASE_BODY.md
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -85,6 +103,5 @@ jobs:
           generate_release_notes: true
           body_path: RELEASE_BODY.md
           files: |
-            dist/*.factory.bin
-            dist/*.app.bin
+            dist/*.bin
             dist/SHA256SUMS.txt
