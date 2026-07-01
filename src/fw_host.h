@@ -316,10 +316,11 @@ class Host {
   void HostDeliver(const uint8_t* buf, uint16_t len);
 
   /**
-   * @brief Symmetric-link auto TX-power control (opt-in via FEAT_APWR).
+   * @brief Peer-SNR auto TX-power control (FEAT_APWR; ON by default).
    *
-   * Nudges TX power so our received RSSI lands in a safe window. OFF by
-   * default; a no-op unless FEAT_APWR is set.
+   * Holds our TX power so the SNR the peer reports for us (via the link's
+   * authenticated aux byte) stays a margin above the mode's demod floor. A
+   * no-op unless FEAT_APWR is set; AT+APWR toggles it at runtime.
    */
   void AdjustTxPower();
 
