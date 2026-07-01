@@ -27,12 +27,26 @@ roles at boot.
 |---|---|
 | **1 · Download** | From the **[latest release](https://github.com/terry-lentz/lora-serial/releases/latest)**, download **`lora-serial-<version>.firmware.bin`** (the complete factory image). |
 | **2 · Flash each board** | Open the **[ESP web flasher](https://espressif.github.io/esptool-js/)**, connect a board, and flash that file at offset `0x0`. Repeat for the second board. |
-| **3 · Set the mode once** | In any serial terminal: type `+++`, then `AT+MODE=medium`, then `AT&W` (saved to NVS). |
+| **3 · Power on** | That's it — power both boards. They auto-pair, encrypt, and auto-tune; open a serial terminal on each end and start sending. |
 
-That's the whole setup — the two boards form an encrypted link. (`firmware.bin`
-is the full image that boots a blank chip; the release also ships an `app.bin`
-for OTA — see the release notes.) **Prefer to build from source?** See the
-**Quick start** section below.
+**Defaults, out of the box** — the pair **auto-pairs** (deriving a unique
+per-pair key on first boot) and is **encrypted by default**, and it runs in
+**auto speed** (ADR) and **auto power**, adapting the mode and TX power to the
+link on its own. You don't have to touch anything unless you want to override a
+setting:
+
+- **Encryption key** — already encrypted on a built-in key; run **`AT+TRAIN`**
+  once on both ends for a unique per-pair key. See
+  [SECURITY.md](./docs/SECURITY.md).
+- **Speed** — check the live mode with **`AT+MODE?`**; pin a fixed one with
+  **`AT+MODE=<name>`** (e.g. `medium`), then **`AT&W`** to persist, instead of
+  auto. (Pin a band-compliant mode for your region — see **Regulatory** below.)
+- **TX power** — auto by default; **`AT+APWR=0`** then **`AT+PWR=<dBm>`** to fix
+  it.
+
+(`firmware.bin` is the full image that boots a blank chip; the release also ships
+an `app.bin` for OTA — see the release notes.) **Prefer to build from source?**
+See **[Build from source](#build-from-source)** below.
 
 ## What you get
 
@@ -257,7 +271,7 @@ it up).
 - [ROADMAP](./docs/ROADMAP.md) (maturity plan)
 - [CODING_STANDARDS](./docs/CODING_STANDARDS.md) (the full coding-standards rationale)
 
-## Quick start (build → flash → use)
+## Build from source
 
 Two boards, ~10 minutes. You need [PlatformIO](https://platformio.org/) and two
 XIAO ESP32S3 + Wio-SX1262 boards. (Don't want to build? Grab prebuilt
