@@ -1,0 +1,7 @@
+# Code owners — a matching owner's review is required on pull requests that touch
+# matching files (enforced by the branch ruleset's "Require review from Code
+# Owners"). The last matching pattern wins.
+# Docs: https://docs.github.com/articles/about-code-owners
+
+# Everything is owned by the maintainer, for now.
+*       @terry-lentz
