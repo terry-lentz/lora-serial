@@ -20,7 +20,9 @@ jobs:
           python-version: '3.x'
 
       - name: Install PlatformIO + esptool
-        run: pip install --upgrade platformio esptool
+        # Pin esptool <5: the merge_bin subcommand and --flash_* option names below
+        # are the v4 CLI; esptool 5.x renamed them (merge-bin, --flash-*).
+        run: pip install --upgrade platformio "esptool<5"
 
       - name: Native tests (gate the release)
         run: pio test -e native
@@ -29,10 +31,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          BOOT_APP0="$(find ~/.platformio/packages -name boot_app0.bin | head -1)"
           for env in node_raw; do
             pio run -e "$env"
             d=".pio/build/$env"
+            # boot_app0.bin ships with the ESP32 Arduino framework, which is only
+            # installed once the `pio run` above fetches it — so resolve the path
+            # here, after the build, not before it.
+            BOOT_APP0="$(find ~/.platformio/packages -name boot_app0.bin | head -1)"
+            if [ -z "$BOOT_APP0" ]; then
+              echo "::error::boot_app0.bin not found under ~/.platformio/packages" >&2
+              exit 1
+            fi
             # Single-file factory image: flash at 0x0 (esptool / ESP Web Tools).
             esptool.py --chip esp32s3 merge_bin -o "dist/${env}.factory.bin" \
               --flash_mode keep --flash_freq keep --flash_size keep \
