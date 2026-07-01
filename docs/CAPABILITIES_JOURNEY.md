@@ -4,7 +4,7 @@ What this link can do, the problems we hit getting there, and how each was solve
 Together these are the features that make a **lean, reliable, fast point-to-point
 "LoRa serial cable"** — and where, for the *P2P* job specifically, it stands up to
 (and in places exceeds) general stacks like Reticulum. See
-[ALTERNATIVES.md](./ALTERNATIVES.md) for the honest head-to-head, [DESIGN.md](./DESIGN.md)
+[SW_ALTERNATIVES.md](./SW_ALTERNATIVES.md) for the honest head-to-head, [DESIGN.md](./DESIGN.md)
 for the transport spec, [RESEARCH.md](./RESEARCH.md) for the techniques, and
 [SECURITY.md](./SECURITY.md) for the crypto plan.
 

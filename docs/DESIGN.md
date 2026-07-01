@@ -6,7 +6,7 @@ remote consoles for serial devices) is just an existing tool riding on top of th
 pipe — we don't ship those, the plain serial port lets you use the ones you have.
 
 It is deliberately **not** a mesh. That narrowness is the whole advantage — see
-[ALTERNATIVES.md](./ALTERNATIVES.md) for how this lets us beat general-purpose
+[SW_ALTERNATIVES.md](./SW_ALTERNATIVES.md) for how this lets us beat general-purpose
 stacks (Reticulum/Meshtastic) at the specific 2-node job.
 
 > **Status: this design is implemented and hardware-validated.** Selective-Repeat

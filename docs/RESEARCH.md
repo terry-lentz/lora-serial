@@ -3,7 +3,7 @@
 Survey of current techniques (with sources), what each does in plain language,
 whether it fits our **point-to-point reliable serial** goal, and what we chose to
 implement. Companion to [DESIGN.md](./DESIGN.md) (the transport spec) and
-[ALTERNATIVES.md](./ALTERNATIVES.md) (prior art / positioning).
+[SW_ALTERNATIVES.md](./SW_ALTERNATIVES.md) (prior art / positioning).
 
 Ground truth: **nothing beats the PHY ceiling.** Same SX1262 → same physics. These
 techniques are about (a) getting *closer* to the ceiling, (b) surviving loss without

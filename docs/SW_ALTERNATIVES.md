@@ -1,4 +1,7 @@
-# Alternatives & prior art
+# Software alternatives & prior art
+
+*For radio-hardware alternatives (LoRa vs SiK vs Wi-Fi HaLow), see
+[HW_ALTERNATIVES.md](./HW_ALTERNATIVES.md).*
 
 Before/while building this, we evaluated what already exists for "data over LoRa,"
 so we know what we're duplicating, what we're not, and why we chose to build a
