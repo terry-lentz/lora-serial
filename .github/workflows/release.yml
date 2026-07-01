@@ -1,0 +1,81 @@
+name: Release
+
+# Tag a commit (e.g. `git tag v0.1.0 && git push --tags`) to build all firmware
+# variants, package flashable images, and publish a GitHub Release with auto notes.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # needed to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO + esptool
+        run: pip install --upgrade platformio esptool
+
+      - name: Native tests (gate the release)
+        run: pio test -e native
+
+      - name: Build + package flashable firmware
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          BOOT_APP0="$(find ~/.platformio/packages -name boot_app0.bin | head -1)"
+          for env in node_raw; do
+            pio run -e "$env"
+            d=".pio/build/$env"
+            # Single-file factory image: flash at 0x0 (esptool / ESP Web Tools).
+            esptool.py --chip esp32s3 merge_bin -o "dist/${env}.factory.bin" \
+              --flash_mode keep --flash_freq keep --flash_size keep \
+              0x0 "$d/bootloader.bin" \
+              0x8000 "$d/partitions.bin" \
+              0xe000 "$BOOT_APP0" \
+              0x10000 "$d/firmware.bin"
+            # Also ship the bare app image (for OTA / advanced flashing).
+            cp "$d/firmware.bin" "dist/${env}.app.bin"
+          done
+          (cd dist && sha256sum *.bin > SHA256SUMS.txt)
+          ls -l dist
+
+      - name: Flashing instructions (release body prefix)
+        run: |
+          cat > RELEASE_BODY.md <<'EOF'
+          ## Flash a board (no toolchain needed)
+
+          Both boards run the **same image** (`node_raw`) — flash it to each; they
+          auto-elect the half-duplex role from their chip MACs at boot, so there's
+          nothing per-board to set.
+
+          **Easiest — web flasher:** open https://espressif.github.io/esptool-js/, connect the
+          board, and flash `node_raw.factory.bin` at offset `0x0`.
+
+          **Or with esptool:**
+          ```bash
+          esptool.py --chip esp32s3 write_flash 0x0 node_raw.factory.bin   # board 1
+          esptool.py --chip esp32s3 write_flash 0x0 node_raw.factory.bin   # board 2
+          ```
+
+          Then set the radio mode once (persists in NVS): `+++`, `AT+MODE=medium`, `AT&W`.
+          See the README for modes, AT commands, and the login-terminal setup.
+
+          ---
+          EOF
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body_path: RELEASE_BODY.md
+          files: |
+            dist/*.factory.bin
+            dist/*.app.bin
+            dist/SHA256SUMS.txt
