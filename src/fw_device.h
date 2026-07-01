@@ -88,6 +88,13 @@ class Device {
    */
   uint32_t rendezvous_count() const { return rendezvous_count_; }
   /**
+   * @brief millis() timestamp of the last VALID received frame (real link
+   *        traffic, not noise). Used by auto-power to tell when the link has
+   *        gone silent so it can ramp TX power back up (fw_host AdjustTxPower).
+   * @return the last-valid-RX time in millis(), or 0 if none since boot.
+   */
+  uint32_t last_rx_ms() const { return last_rx_ms_; }
+  /**
    * @brief Experimental inter-frame TX pacing (ms) inside a burst, set via
    *        AT+TXGAP; a deliberate gap between frames for field experiments.
    * @return the inter-frame pacing in milliseconds (0 = off).

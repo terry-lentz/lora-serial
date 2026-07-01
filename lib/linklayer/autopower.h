@@ -51,6 +51,16 @@ static const int kAutoPwrMarginHi = 12;
 static const int kAutoPwrMarginLo = 6;
 /// per-adjustment change to TX power (dB); small so the loop settles smoothly
 static const int8_t kAutoPwrStepDb = 2;
+/**
+ * @brief The SNR a node reports to the peer when it can NOT hear the peer (no
+ *        valid frame for a while) — a sentinel well below any real demod floor.
+ *
+ * A deaf node would otherwise keep sending a *stale* "I hear you fine" report,
+ * so the peer holds a too-low power and the link can't re-establish after a
+ * reboot on an asymmetric path. Reporting this instead makes the peer's
+ * AutoPowerStep boost (margin far below kAutoPwrMarginLo), closing the loop.
+ */
+static const int kApNoSignalSnr = -30;
 
 /**
  * @brief Decide the next TX power from the peer's reported SNR.
@@ -67,10 +77,24 @@ static const int8_t kAutoPwrStepDb = 2;
  * @param[in] snr_floor  the current mode's demodulator floor (dB).
  * @param[in] floor_dbm  lowest TX power the loop may drop to (dBm).
  * @param[in] max_dbm    highest TX power the loop may rise to (dBm).
+ * @param[in] link_silent  true when no fresh valid frame has arrived from the
+ *                         peer (stale feedback) — ramp power UP toward max to
+ *                         re-establish, ignoring the stale peer_snr.
  * @return the new TX power (dBm) to apply.
  */
 inline int8_t AutoPowerStep(int8_t cur_tx, int peer_snr, int snr_floor,
-                            int8_t floor_dbm, int8_t max_dbm) {
+                            int8_t floor_dbm, int8_t max_dbm,
+                            bool link_silent = false) {
+    // Link gone silent — no fresh valid frame from the peer? Then peer_snr is
+    // stale, and a power we eased DOWN during the last good session may be the
+    // very reason the peer can no longer hear us. Ramp UP toward max to
+    // re-establish; we ease down again only once two-way contact resumes. This
+    // lets a rebooted peer re-link on an asymmetric path instead of starving
+    // at a too-low power (docs/CAPABILITIES_JOURNEY.md entry 32).
+    if (link_silent) {
+        if (cur_tx < max_dbm) cur_tx += kAutoPwrStepDb;
+        return cur_tx > max_dbm ? max_dbm : cur_tx;
+    }
     int margin = peer_snr - snr_floor;   // dB the peer hears us above its floor
     if (margin > kAutoPwrMarginHi && cur_tx > floor_dbm)
         cur_tx -= kAutoPwrStepDb;        // peer has headroom -> ease off

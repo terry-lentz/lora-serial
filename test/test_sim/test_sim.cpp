@@ -999,6 +999,81 @@ void test_autopower_own_rssi_ok_when_symmetric() {
         "symmetric link should stay up even with the own-rssi loop");
 }
 
+/**
+ * @brief Teeth: auto-power must ramp back UP out of silence to re-establish a
+ *        link that starved when the peer went away (e.g. rebooted).
+ *
+ * Models the exact hardware bug: a node eased its TX power down to the floor
+ * during a good session; the peer then reboots and can no longer hear that
+ * too-quiet signal, so no fresh SNR feedback arrives. With the fix, the silent
+ * link makes the node ramp power UP until the peer hears it again; without it,
+ * the node holds the stale-low power forever and never re-links.
+ *
+ * Channel: the peer's SNR of us is (our_tx - path); it decodes at snr >= floor,
+ * and only a decoded frame gives us fresh feedback (clears the silence).
+ */
+void test_autopower_recovers_from_silence() {
+    const int path = 5, floor = -8;
+    int tx = kPwrFloor;              // eased to the floor last session
+    int silent = 0; bool linked = false; int link_round = -1;
+    for (int r = 0; r < 200; r++) {
+        int snr_at_peer = tx - path;
+        bool peer_hears = snr_at_peer >= floor;   // decoded -> fresh feedback
+        if (peer_hears) {
+            silent = 0;
+            if (!linked) { linked = true; link_round = r; }
+        } else {
+            silent++;
+        }
+        bool link_silent = silent >= 2;                // no fresh RX for a bit
+        int peer_snr = peer_hears ? snr_at_peer : 0;   // stale 0 when unheard
+        tx = link_layer::AutoPowerStep((int8_t)tx, peer_snr, floor,
+                                       (int8_t)kPwrFloor, (int8_t)kPwrMax,
+                                       link_silent);
+    }
+    printf("  [silence-recover: linked=%d @round=%d final_tx=%d]\n",
+           (int)linked, link_round, tx);
+    TEST_ASSERT_TRUE_MESSAGE(linked,
+        "auto-power must ramp out of silence so the peer can hear us again");
+    TEST_ASSERT_TRUE_MESSAGE(link_round >= 0 && link_round < 40,
+        "recovery must be bounded, not stuck at low power");
+}
+
+/**
+ * @brief Run the quiet side's power loop while its peer is deaf and keeps
+ *        reporting `deaf_report` — return true if it ramps up enough that the
+ *        peer finally decodes it (peer hears us once our_tx - path >= floor).
+ *
+ * @param[in] deaf_report the SNR the deaf peer keeps telling us it hears us at.
+ * @return true if the link re-established within the run.
+ */
+static bool deaf_report_links(int deaf_report) {
+    const int path = 14, floor = -8;
+    int tx = kPwrFloor;             // eased to the floor last session
+    for (int r = 0; r < 200; r++) {
+        if (tx - path >= floor) return true;   // the peer now decodes us
+        tx = link_layer::AutoPowerStep((int8_t)tx, deaf_report, floor,
+                                       (int8_t)kPwrFloor, (int8_t)kPwrMax,
+                                       /*link_silent=*/false);
+    }
+    return false;
+}
+
+/**
+ * @brief Teeth: the peer's report decides whether the quiet side recovers.
+ *
+ * The starved node (eased to the floor) can't hear the peer directly — it only
+ * knows how the peer *reports* hearing it. A stale "I hear you fine" report
+ * holds it at the floor forever (the bug); the honest kApNoSignalSnr report
+ * drives it UP until the peer can hear it again (the fix, fw_device loops).
+ */
+void test_autopower_deaf_side_reports_no_signal() {
+    TEST_ASSERT_FALSE_MESSAGE(deaf_report_links(/*stale "fine"*/ 5),
+        "a stale 'I hear you' report must leave us starved (the bug)");
+    TEST_ASSERT_TRUE_MESSAGE(deaf_report_links(link_layer::kApNoSignalSnr),
+        "an honest 'no signal' report must drive us up to re-link (the fix)");
+}
+
 // ===========================================================================
 // COORDINATED HEADROOM: auto-power + ADR together. Auto-power alone minimizes
 // power for the CURRENT mode; under ADR that strands the mode controller a rung
@@ -1326,6 +1401,8 @@ int main() {
     RUN_TEST(test_autopower_fixed_holds_asym);
     RUN_TEST(test_autopower_peer_snr_holds_asym);
     RUN_TEST(test_autopower_own_rssi_ok_when_symmetric);
+    RUN_TEST(test_autopower_recovers_from_silence);
+    RUN_TEST(test_autopower_deaf_side_reports_no_signal);
     RUN_TEST(test_sim_adr_autopower_coordinated_climbs);
     return UNITY_END();
 }
