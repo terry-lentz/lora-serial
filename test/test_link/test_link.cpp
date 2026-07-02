@@ -1518,6 +1518,86 @@ void test_identity_election() {
     TEST_ASSERT_TRUE(ia != ra);         // the two ends never share an address
 }
 
+/**
+ * @brief One board's view of MAC discovery: from our MAC and the peer MAC we
+ *        heard beaconed, elect the role and assign addresses.
+ *
+ * Mirrors what Device::DiscoverRole() does per board (identity.h election +
+ * AssignAddrs), so the two-board OUTCOME can be checked natively without a
+ * radio. A test fixture only — it stays here, not in identity.h.
+ *
+ * @param[in]  my_mac   this board's 6-byte MAC.
+ * @param[in]  peer_mac the peer MAC this board heard.
+ * @param[out] addr     receives this board's elected link address.
+ * @param[out] peer     receives the peer's link address.
+ * @return true if this board elected itself the initiator.
+ */
+static bool discover_view(const uint8_t my_mac[6], const uint8_t peer_mac[6],
+                          uint8_t* addr, uint8_t* peer) {
+    bool init = link_layer::ElectInitiator(my_mac, peer_mac);
+    link_layer::AssignAddrs(init, addr, peer);
+    return init;
+}
+
+/**
+ * @brief Assert the two-board discovery outcome is always safe: complementary
+ *        roles, mutually-agreed addresses, and distinct (nonce-safe) addresses.
+ *
+ * This is the invariant the entry-34 regression broke on hardware: with role
+ * election compiled out, BOTH boards defaulted to address 1 and both elected
+ * themselves initiator, so no link formed. Whenever the election runs, exactly
+ * one board is the initiator — never both, never neither.
+ *
+ * @param[in] mac_a first board's MAC.
+ * @param[in] mac_b second board's MAC (must differ from @p mac_a).
+ */
+static void assert_discovery_safe(const uint8_t mac_a[6],
+                                  const uint8_t mac_b[6]) {
+    uint8_t aa, ap, ba, bp;
+    bool a_init = discover_view(mac_a, mac_b, &aa, &ap);   // board A's view
+    bool b_init = discover_view(mac_b, mac_a, &ba, &bp);   // board B's view
+    // Exactly one initiator: "both initiator" (the entry-34 symptom) and
+    // "neither initiator" are both impossible for two distinct MACs.
+    TEST_ASSERT_TRUE(a_init != b_init);
+    // The two ends agree on the address map (A's addr is B's peer, and v.v.).
+    TEST_ASSERT_EQUAL_UINT8(aa, bp);
+    TEST_ASSERT_EQUAL_UINT8(ba, ap);
+    // Distinct, non-zero addresses -> the AEAD nonce never repeats per side.
+    TEST_ASSERT_TRUE(aa != ba);
+    TEST_ASSERT_TRUE(aa != 0 && ba != 0);
+}
+
+/**
+ * @brief MAC discovery converges to a safe role split for every MAC pair.
+ *
+ * Drives assert_discovery_safe over two example board MACs, a near-tie pair
+ * (differ only in the last byte), and a deterministic sweep of random pairs —
+ * so the "both boards became initiator" hardware failure (journey entry 34)
+ * can never originate in the election logic itself. (The regression was the
+ * feature being compiled OUT of the firmware, which native tests can't see;
+ * the build-time guard in fw_device.cpp covers that half.)
+ */
+void test_mac_discovery_outcome() {
+    // Two example distinct factory MACs (the bench boards' USB-id MACs).
+    uint8_t b0[6] = {0xB8,0xF8,0x62,0xF8,0x9A,0xF8};
+    uint8_t b1[6] = {0xB8,0xF8,0x62,0xF9,0xFA,0x50};
+    assert_discovery_safe(b0, b1);
+    // Near-tie: identical except the least-significant byte.
+    uint8_t t0[6] = {1,2,3,4,5,6}, t1[6] = {1,2,3,4,5,7};
+    assert_discovery_safe(t0, t1);
+    // Property sweep: many random distinct pairs all resolve safely.
+    rng_seed(0xD15C0DE);   // "DISC0DE" — deterministic discovery test vector
+    for (int i = 0; i < 2000; i++) {
+        uint8_t x[6], y[6];
+        for (int j = 0; j < 6; j++) {
+            x[j] = (uint8_t)(rnd() & 0xFF);
+            y[j] = (uint8_t)(rnd() & 0xFF);
+        }
+        if (memcmp(x, y, 6) == 0) y[5] ^= 1;   // force the MACs distinct
+        assert_discovery_safe(x, y);
+    }
+}
+
 /** @brief Unity per-test setup hook (no global state to prepare). */
 void setUp() {}
 /** @brief Unity per-test teardown hook (nothing to clean up). */
@@ -1588,5 +1668,6 @@ int main() {
     RUN_TEST(test_frame_ring_wrap_byte_exact);
     RUN_TEST(test_frame_ring_oversize_rejected);
     RUN_TEST(test_identity_election);
+    RUN_TEST(test_mac_discovery_outcome);
     return UNITY_END();
 }

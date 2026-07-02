@@ -6,8 +6,8 @@ journey behind each. Companion to [ROADMAP.md](./ROADMAP.md) and
 
 | Feature | Status |
 |---|---|
-| **`auto` mode (ADR)** | ✅ **Done** — implemented, sim-tested, hardware-validated |
-| **GFSK `ludicrous`** | ✅ **Done** — implemented, hardware-validated; the fastest mode |
+| **`auto` mode (ADR)** | ⚗️ **Opt-in / experimental** — built + sim-tested + bench-tested; **off by default**, needs field validation |
+| **GFSK `ludicrous`** | ✅ **Done** — implemented, hardware-validated; the fastest mode (opt-in in `auto`) |
 | **CAD turn-around** | ⏸ Explored, **deliberately deprioritized** (see below) |
 
 **The shared foundation (built):** both ends must always agree on the PHY, so any
@@ -21,17 +21,30 @@ control config (`kCtrlSf`/`kCtrlBwCode`/`kCtrlCr` = SF12/BW125/CR4-8).
 
 ---
 
-## 1. `auto` mode — Adaptive Data Rate (ADR)  ✅ IMPLEMENTED
+## 1. `auto` mode — Adaptive Data Rate (ADR)  ⚗️ OPT-IN / EXPERIMENTAL
 
-**Status.** Implemented, unit-tested in the native sim, and hardware-tested. The
-decision logic is the portable, unit-tested **ADR controller**
-(`lib/linklayer/adr.h`), driven over the **mode-switch handshake**
-(`lib/linklayer/modeswitch.h`: REQ → ACK → both apply → probation auto-revert).
-Enable with `AT+MODE=auto` on the initiator; it maps measured **SNR + the real
-retransmit rate** → fastest safe preset, steps **down eagerly on loss** / **up
-with hysteresis**, and (opt-in) gates GFSK behind a strong **RSSI** (not SNR —
-LoRa SNR saturates ~+11 dB, so it can't tell a 5 cm link from a marginal one).
-With `auto` off, the hot path is byte-identical to before.
+**Status.** Built, unit-tested in the native sim, and bench-tested — but **off
+by default** and opt-in, pending field validation (a marginal link can leave it
+wedged in the slowest mode; see "What's left"). The decision logic is the
+portable, unit-tested **ADR controller** (`lib/linklayer/adr.h`), driven over
+the **mode-switch handshake** (`lib/linklayer/modeswitch.h`: REQ → ACK → both
+apply → probation auto-revert). Enable with `AT+MODE=auto` on the initiator; it
+maps measured **SNR + the real retransmit rate** → fastest safe preset, steps
+**down eagerly on loss** / **up with hysteresis**, and (opt-in) gates GFSK
+behind a strong **RSSI** (not SNR — LoRa SNR saturates ~+11 dB, so it can't tell
+a 5 cm link from a marginal one). With `auto` off (the default), the hot path is
+byte-identical to a fixed mode.
+
+**Novel for point-to-point LoRa.** Adaptive data rate exists in LoRaWAN, but
+there it is *network-server-driven* for a star topology — a gateway collects
+each end-device's uplink SNR and commands its rate/power. That machinery doesn't
+apply to a symmetric two-node link with no server. Doing it here — a
+**peer-coordinated** make-before-break rate switch between two equal nodes,
+driven by SNR *and* the live retransmit rate, paired with a closed-loop
+**peer-SNR auto-power** loop — is, as far as we've been able to find, new ground
+for open-source point-to-point LoRa: Meshtastic and Reticulum both use
+preset/named modes and a manually-set TX power. It's promising, but that novelty
+is exactly why it stays experimental until more field range confirms it.
 
 > **The mode-coordination bug hunt (a real journey).** Getting runtime mode
 > switching reliable was the hardest part of the project, and it taught us that
@@ -317,9 +330,18 @@ extreme close range. That's why it ships opt-in and isn't in the ADR ladder.
 
 Of the three, only **CAD** remains unbuilt, and it's deliberately deprioritized
 (LoRa-only, mainly a power win, our nodes are USB-powered — see its section above).
-The optional follow-ups on the two shipped features:
-- **`auto`/ADR:** tune the SNR margins/hysteresis in the field; make auto-power
-  SNR-margin-aware per mode (the close-range gotcha above); optionally let `auto`
-  opt into GFSK as a top rung.
+The two adaptive features are built but ship **off by default** (opt-in), with
+real work left before they're stable enough to promise:
+- **`auto`/ADR + auto-power (the blocker):** field testing showed the pair can
+  ratchet down to the slowest mode and fail to climb back. The leading cause is
+  a switch-instant transient — a faster rung is applied at the *held* (possibly
+  auto-power-floored) TX power, so it is born below its higher demod floor and
+  the 4 s mode-switch probation reverts it before auto-power's 2 dB/tick ramp
+  can catch up. The fix (deferred): carry power *across* an upward switch (raise
+  TX power to the new rung's floor + margin as part of applying it), modelled
+  first with a **marginal-SNR** closed-loop sim test that reproduces the
+  born-deaf revert. See [journey entry 34](./CAPABILITIES_JOURNEY.md).
+- **`auto`/ADR (tuning):** tune the SNR margins/hysteresis in the field;
+  optionally let `auto` opt into GFSK as a top rung.
 - **GFSK `ludicrous`:** reduce the residual re-arm frame loss (TX pacing — under
   evaluation), and field-test at realistic short range rather than cm-range bench.

@@ -21,6 +21,22 @@
 #include "fw_session.h"  // per-session key handshake (forward secrecy)
 #include "identity.h"    // link_layer::ElectInitiator — MAC-based election
 
+// Single-image safety guard. Both boards flash the SAME node_raw image and
+// MUST auto-elect distinct roles/addresses from their MACs at runtime
+// (MAC_ROLE, defined in fw_config.h). If MAC_ROLE is ever compiled out (a lost
+// #define, a dropped include), RecomputeRole() falls back to the static
+// NODE_ADDR default (1) on BOTH boards, so both elect themselves initiator and
+// the link never forms. That regression shipped once, silently — the discovery
+// code survived a refactor but its enabling #define did not (journey entry 34).
+// This turns that failure into a BUILD error, not a dead link found in the
+// field. A deliberate legacy static-address build is still allowed: set
+// distinct per-board NODE_ADDR/PEER_ADDR (e.g. 1/2 and 2/1) and this passes.
+#if !MAC_ROLE && (NODE_ADDR == 1) && (PEER_ADDR == 0)
+#error "node_raw needs MAC role election: MAC_ROLE is off yet both boards use \
+the default address 1 -> both become initiator, no link. Enable MAC_ROLE, or \
+build each board with distinct NODE_ADDR/PEER_ADDR."
+#endif
+
 // The single device-orchestration instance (static singleton; no heap —
 // rule 5).
 Device g_device;

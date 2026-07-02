@@ -73,7 +73,7 @@ and the sender is already listening. This removes both the fixed-timeout dead ti
 and the "abandon the burst halfway" failure. A safety timeout still exists, but the
 *normal* path is event-driven.
 
-### 5. Adaptive data rate (`auto` / ADR) — ✅ implemented
+### 5. Adaptive data rate (`auto` / ADR) — ✅ built; opt-in (experimental)
 The `auto` mode lets the link pick its own PHY at runtime instead of being pinned
 to one named mode. Two mechanisms make this safe:
 
@@ -113,6 +113,15 @@ the measured **retransmit rate**:
   it doesn't oscillate);
 - a **cooldown** after each switch, and a timeout that aborts a switch that can't
   complete. See [FUTURE_MODES.md](./FUTURE_MODES.md) for the tuning constants.
+
+**Shipped default: off.** The factory default is a *fixed* `medium` mode at full
+power (`FEAT_DEFAULT` = compression + encryption only). The handshake in (a) is
+also what `AT+MODE=<name>` uses, so fixed-mode switching is validated; it is the
+ADR *policy* in (b) and auto-power that are opt-in and **experimental**. Both
+pass the native sim, but field testing found the policy can wedge in the slowest
+mode on a marginal link, and auto-power can leave a just-switched faster mode
+below its demod floor — so they stay off by default pending more range testing
+(see [CAPABILITIES_JOURNEY.md](./CAPABILITIES_JOURNEY.md)).
 
 **Roles:** "initiator" vs "responder" is purely *who drives ADR and starts turns*
 — it is **not** client/server and not visible to the app. Either board can be

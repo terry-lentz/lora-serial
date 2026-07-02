@@ -31,7 +31,31 @@ BUILD="$ROOT/.pio/build/$ENV"
 # Resolve the PlatformIO-managed Python, esptool, and boot_app0.
 PYIO="$(command -v pio >/dev/null 2>&1 && readlink -f "$(command -v pio)" | sed 's:/bin/pio$:/bin/python:' || true)"
 [ -x "$PYIO" ] || PYIO="$HOME/.local/share/pipx/venvs/platformio/bin/python"
-ESPTOOL="$(find "$HOME/.platformio/packages" -name esptool.py 2>/dev/null | head -1)"
+# esptool: PREFER a version < 5. The release toolchain pins esptool<5 because
+# v5's CLI/reset changes break this native-USB flash path (reset re-enumerates
+# the port). PlatformIO may have BOTH a v4 registry package and a v5 git-src
+# pin installed; a naive `find | head -1` can grab the v5 one. So probe each
+# candidate's reported version and take the first major < 5, falling back to
+# whatever exists (with a warning) if only a v5 is present.
+ESPTOOL=""
+esptool_first=""
+while IFS= read -r cand; do
+    [ -n "$cand" ] || continue
+    [ -n "$esptool_first" ] || esptool_first="$cand"
+    ver="$({ "$PYIO" "$cand" version 2>/dev/null \
+             || "$PYIO" "$cand" --version 2>/dev/null; } \
+           | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+    major="${ver%%.*}"
+    case "$major" in
+        ''|*[!0-9]*) ;;                       # unparseable — skip
+        *) if [ "$major" -lt 5 ]; then ESPTOOL="$cand"; break; fi ;;
+    esac
+done < <(find "$HOME/.platformio/packages" -name esptool.py 2>/dev/null)
+if [ -z "$ESPTOOL" ]; then
+    ESPTOOL="$esptool_first"
+    [ -z "$ESPTOOL" ] || echo "WARN: no esptool <5 found; using $ESPTOOL —" \
+        "v5 may break this native-USB flash (release pins esptool<5)." >&2
+fi
 BOOTAPP="$(find "$HOME/.platformio/packages" -name boot_app0.bin 2>/dev/null | head -1)"
 
 for f in "$PYIO" "$ESPTOOL" "$BOOTAPP"; do
