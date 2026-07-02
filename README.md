@@ -27,22 +27,36 @@ roles at boot.
 |---|---|
 | **1 · Download** | From the **[latest release](https://github.com/terry-lentz/lora-serial/releases/latest)**, download **`lora-serial-<version>.firmware.bin`** (the complete factory image). |
 | **2 · Flash each board** | Open the **[ESP web flasher](https://espressif.github.io/esptool-js/)**, connect a board, and flash that file at offset `0x0`. Repeat for the second board. |
-| **3 · Power on** | That's it — power both boards. They auto-pair, encrypt, and auto-tune; open a serial terminal on each end and start sending. |
+| **3 · Power on** | That's it — power both boards. They auto-pair and encrypt, then run on the reliable **`medium`** mode at full power; open a serial terminal on each end and start sending. |
 
 **Defaults, out of the box** — the pair **auto-pairs** (deriving a unique
-per-pair key on first boot) and is **encrypted by default**, and it runs in
-**auto speed** (ADR) and **auto power**, adapting the mode and TX power to the
-link on its own. You don't have to touch anything unless you want to override a
-setting:
+per-pair key on first boot), is **encrypted by default**, and runs at a **fixed
+`medium` mode and full TX power** — the reliable, no-surprises path. The two
+adaptive features (**auto speed** / ADR and **auto power**) are **opt-in** and
+still **experimental** — see the note below. You don't have to touch anything
+unless you want to override a setting:
 
 - **Encryption key** — already encrypted on a built-in key; run **`AT+TRAIN`**
   once on both ends for a unique per-pair key. See
   [SECURITY.md](./docs/SECURITY.md).
-- **Speed** — check the live mode with **`AT+MODE?`**; pin a fixed one with
-  **`AT+MODE=<name>`** (e.g. `medium`), then **`AT&W`** to persist, instead of
-  auto. (Pin a band-compliant mode for your region — see **Regulatory** below.)
-- **TX power** — auto by default; **`AT+APWR=0`** then **`AT+PWR=<dBm>`** to fix
-  it.
+- **Speed** — ships on a fixed **`medium`** mode. Check it with **`AT+MODE?`**;
+  switch with **`AT+MODE=<name>`** (then **`AT&W`** to persist). Pick a
+  band-compliant mode for your region — see **Regulatory** below.
+- **TX power** — full power by default; **`AT+PWR=<dBm>`** to set a fixed lower
+  value.
+
+> ⚠️ **Auto speed and auto power are experimental (off by default) — novel, and
+> promising.** As far as we've found, no other open-source point-to-point LoRa
+> link does these: LoRaWAN's ADR is network-server-driven for a star of nodes
+> around a gateway, and Meshtastic/Reticulum set TX power by hand. Here they're
+> **peer-coordinated on a symmetric two-node link** — adaptive data rate keyed
+> off SNR *and* the live retransmit rate, plus a closed-loop peer-SNR power loop.
+> Both pass the native sim and show real promise, but field testing surfaced
+> cases they don't yet handle reliably (ADR can wedge in the slowest mode on a
+> marginal link; auto-power can leave a just-switched mode below its demod
+> floor), so they need more validation before we'd call them stable. Enable them
+> to experiment — the fixed-mode default is what we trust for everyday use.
+> Details in [CAPABILITIES_JOURNEY.md](./docs/CAPABILITIES_JOURNEY.md).
 
 (`firmware.bin` is the full image that boots a blank chip; the release also ships
 an `app.bin` for OTA — see the release notes.) **Prefer to build from source?**
@@ -102,19 +116,18 @@ encryption, and on-device diagnostics. The headlines, and the depth under each:
 - ⚡ **Speed vs. range on the fly** — retune the radio at runtime, no reflash.
   - Six modes from **turbo** (SF5) to **far** (SF12), plus an experimental
     **ludicrous** GFSK mode; `AT+MODE=<name>` switches both ends together.
-  - **`AT+MODE=auto` is ADR** (adaptive data rate), **on by default**: a
-    loss-aware engine that picks the fastest mode the link's SNR *and*
-    retransmit rate will carry, and steps down for range on its own. It now
-    carries sustained bulk byte-exact too — an earlier bulk-transfer wedge
-    turned out to be a software throttle in the RX task, since fixed
-    ([journey entry 29](./docs/CAPABILITIES_JOURNEY.md)). Pin a fixed mode with
-    `AT+MODE=<name>` to opt out.
-  - **Auto-power** (`AT+APWR`) trims each side's TX power to what the peer's
-    signal report says the link needs. So out of the box a board runs
-    **compression + encryption + auto-power + ADR** — a self-tuning, encrypted
-    link with zero setup. Only the GFSK **`ludicrous`** rung stays opt-in
-    (`AT+ADRGFSK=1`): the fastest rung, but short-range and pending field-range
-    validation.
+  - **`AT+MODE=auto` is ADR** (adaptive data rate) — a loss-aware engine that
+    picks the fastest mode the link's SNR *and* retransmit rate will carry, and
+    steps down for range on its own. **Opt-in and experimental:** on a marginal
+    link it can wedge in the slowest mode, so it's off by default pending more
+    field validation.
+  - **Auto-power** (`AT+APWR=1`) trims each side's TX power to what the peer's
+    signal report says the link needs. Also **opt-in and experimental** — a
+    mode switch can leave the faster mode below its demod floor — so out of the
+    box a board runs **compression + encryption at a fixed `medium` mode and
+    full power**, and you can enable the two adaptive features to experiment.
+    The GFSK **`ludicrous`** rung is opt-in too (`AT+ADRGFSK=1`): the fastest
+    rung, but short-range and pending field-range validation.
   - Tune frequency (`AT+FREQ`), sync word (`AT+SYNC`), TX power (`AT+PWR`), and
     inter-frame gap (`AT+TXGAP`) live — set the carrier for your region
     (see the **Regulatory** section below).
@@ -553,9 +566,9 @@ Like a Hayes dial-up modem, the transparent serial build (`*_raw`) understands a
    | `AT+MODE?` | show current range/speed mode + the available presets |
    | `AT+MODE=<name>` | pin a fixed mode and **coordinate the peer**: `turbo` (SF5/500) · `fast` (SF7/500) · `medium` (SF7/250) · `slow` (SF9/125) · `far` (SF12/125) · `ludicrous` (GFSK). Run on the **initiator**; it switches both ends via a make-before-break handshake (the responder follows). Timing auto-derives from the mode. |
    | `AT+FMODE=<name>` | **force** this mode locally only (no peer coordination). Use to set both ends manually (run it on each) or to recover a mismatched pair. |
-   | `AT+MODE=auto` | **adaptive data rate** — the initiator measures link SNR **and the live retransmit rate** and *coordinates both ends* to the fastest mode the link sustains (responder follows; handshake with auto-revert, plus a dead-link rendezvous to recover any mismatch). Climbs `far`…`turbo`; steps up to GFSK `ludicrous` on a strong, close-range link (`AT+ADRGFSK=1`). Run on the initiator. **On by default**; carries sustained bulk byte-exact (the old heavy-load wedge was an RX-task throttle, fixed — [journey 29](./docs/CAPABILITIES_JOURNEY.md)). Pin a fixed mode with `AT+MODE=<name>` to opt out. |
-   | `AT+PWR=n` | set TX power to `n` dBm (fixed unless auto-power is on) |
-   | `AT+APWR=0\|1` / `AT+APWR?` | toggle **auto TX-power** control. **On by default** — a peer-SNR feedback loop holds each side's TX power a margin above the mode's demod floor; set `AT+APWR=0` to pin fixed power. See [THROUGHPUT.md](./docs/THROUGHPUT.md). |
+   | `AT+MODE=auto` | **adaptive data rate** (opt-in, **experimental**) — the initiator measures link SNR **and the live retransmit rate** and *coordinates both ends* to the fastest mode the link sustains (responder follows; handshake with auto-revert, plus a dead-link rendezvous to recover any mismatch). Climbs `far`…`turbo`; steps up to GFSK `ludicrous` on a strong, close-range link (`AT+ADRGFSK=1`). Run on the initiator. **Off by default** — field testing found it can wedge in the slowest mode on a marginal link; the fixed-mode default (`medium`) is the reliable path. See [journey](./docs/CAPABILITIES_JOURNEY.md). |
+   | `AT+PWR=n` | set TX power to `n` dBm (fixed unless auto-power is on); default is full power |
+   | `AT+APWR=0\|1` / `AT+APWR?` | toggle **auto TX-power** control (opt-in, **experimental**). A peer-SNR feedback loop holds each side's TX power a margin above the mode's demod floor. **Off by default** — a mode switch can leave the faster mode below its demod floor; set `AT+APWR=1` to experiment. See [THROUGHPUT.md](./docs/THROUGHPUT.md). |
    | `AT+ADDR=n` / `AT+PEER=n` | *(advanced/legacy)* override the link address — normally **auto-elected from the MAC** at boot, so you don't set these. |
    | `AT+NAME=s` | set this node's name (≤15 chars) |
    | `AT+FREQ=mhz` / `AT+FREQ?` | set/show carrier frequency (e.g. `923.2`); accepts ~150–960 MHz. **Both ends must match.** Verify it's legal for your region. |
@@ -739,13 +752,13 @@ Picking a legal *frequency* is only half of it: regulators also cap the
 - **EU / UK (ETSI EN 300 220):** 868 MHz is narrow-channelized — **500 kHz is
   not permitted**; stay ≤ 250 kHz.
 
-> ⚠️ **Auto mode + Taiwan.** With `AT+MODE=auto` (ADR, **on by default**) the
-> link *automatically* climbs into `turbo`/`ludicrous` on a strong (close-range)
-> link — i.e. into the wide bandwidths that are **outside** Taiwan's plan. For a
-> Taiwan deployment, either pin a compliant mode (`AT+MODE=medium` then `AT&W`)
-> or disable the GFSK rung (`AT+ADRGFSK=0`); a built-in region/bandwidth cap
-> (keep ADR ≤ 250 kHz) is planned. On a controlled bench it's fine — for field
-> use, mind the OBW.
+> ⚠️ **Auto mode + Taiwan.** If you enable `AT+MODE=auto` (ADR — opt-in, off by
+> default) the link *automatically* climbs into `turbo`/`ludicrous` on a strong
+> (close-range) link — i.e. into the wide bandwidths that are **outside**
+> Taiwan's plan. The default fixed `medium` mode stays within the plan; if you
+> turn ADR on for a Taiwan deployment, disable the GFSK rung (`AT+ADRGFSK=0`)
+> and mind the OBW. A built-in region/bandwidth cap (keep ADR ≤ 250 kHz) is
+> planned.
 
 ## Hardware notes (Wio-SX1262 on XIAO ESP32S3, B2B connector)
 
@@ -868,8 +881,10 @@ so they **survive reboot and reflash** — set identity/mode once without reflas
 3. ✅ **Authenticated encryption** on the air payload — Ascon-128 AEAD + NVS-persisted
    counter (reboot-safe nonce) + anti-replay window. Next crypto step: Noise/X25519
    handshake for forward secrecy (see [SECURITY.md](./docs/SECURITY.md)).
-4. ✅ **`auto` mode (ADR)** — `AT+MODE=auto`: SNR-driven mode pick + a coordinated
-   make-before-break mode-switch handshake. Sim-tested and hardware-validated.
+4. ✅ **Coordinated mode switching** — `AT+MODE=<name>`: a make-before-break
+   handshake switches both ends together. Sim-tested and hardware-validated.
+   ADR (`AT+MODE=auto`) layers SNR/loss-driven mode *picking* on top — built and
+   sim-tested, but **opt-in/experimental** pending more field validation.
 5. ✅ **GFSK `ludicrous` mode** — opt-in non-LoRa PHY, hardware-validated (the fastest
    mode; dynamically switchable to/from LoRa at runtime).
 6. WiFi config UI (edits the same NVS settings).
@@ -877,9 +892,11 @@ so they **survive reboot and reflash** — set identity/mode once without reflas
 ## Next steps (deferred — the core transport is done)
 
 The reliable, encrypted, mode-flexible transparent serial transport is complete and
-hardware-validated — including `auto`/ADR and the GFSK `ludicrous` mode (both done;
-see [docs/FUTURE_MODES.md](./docs/FUTURE_MODES.md)). These are the
-intentionally-deferred enhancements that remain, in rough priority:
+hardware-validated at a fixed mode. The two adaptive layers — `auto`/ADR and
+auto-power — are built and sim-tested but **opt-in/experimental**, pending more
+field validation (see [docs/FUTURE_MODES.md](./docs/FUTURE_MODES.md) and the
+[journey](./docs/CAPABILITIES_JOURNEY.md)). These are the intentionally-deferred
+enhancements that remain, in rough priority:
 
 - **Phase 5 — rateless / fountain-coded bulk mode.** Encode bulk transfers as a stream
   of fountain symbols (e.g. LT/RaptorQ) so the receiver reconstructs from *any* sufficient

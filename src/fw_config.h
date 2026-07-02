@@ -58,14 +58,15 @@ inline float BwFromCode(uint8_t code) {
  */
 #define FEAT_FS   0x20
 /**
- * @brief Auto TX-power control (ON by default). The loop is now
+ * @brief Auto TX-power control (OPT-IN; OFF by default). The loop is
  *        PEER-SNR feedback: each side holds its own TX power so the SNR the
  *        peer reports for it (via the link's authenticated aux byte) stays a
  *        margin above the mode's demod floor. This fixes the asymmetric-link
  *        starvation of the former own-RSSI loop, which floored one side's power
  *        and deafened the peer on a path with unequal loss each way (sim:
  *        test_autopower_own_rssi_starves_asym vs test_autopower_peer_snr_*).
- *        On by default now; AT+APWR=0 restores fixed power (see FEAT_DEFAULT).
+ *        OFF by default (enable with AT+APWR=1) — field testing surfaced a
+ *        mode-switch interaction that still needs validation (see the JOURNEY).
  */
 #define FEAT_APWR 0x40
 
@@ -96,6 +97,24 @@ static const uint8_t kLinkKey[16] = {
 
 // Build-time defaults (overridable per env). Runtime values live in NVS and can
 // be changed via the config console (and, later, a WiFi UI) without reflashing.
+
+// Role selection. MAC_ROLE (default ON): identical firmware on both boards; at
+// boot each beacons its factory MAC and the numerically LOWER MAC becomes the
+// initiator (address 1), the other the responder (address 2) — which is why
+// there is ONE node_raw env, not per-board NODE_A/NODE_B builds. The discovery
+// code lives in fw_device.cpp under #if MAC_ROLE. Build -DMAC_ROLE=0 for the
+// legacy scheme where the role comes from the static NODE_ADDR/PEER_ADDR below.
+#ifndef MAC_ROLE
+#define MAC_ROLE 1  ///< 1 = auto-elect role from MAC; 0 = static addrs
+#endif
+// PROX_PAIR (default ON, requires MAC_ROLE): first-boot PROXIMITY pairing. An
+// unpaired board (no per-pair key in NVS) pairs ONCE at low power with an
+// ADJACENT board — electing roles, deriving a unique per-pair key over X25519,
+// and persisting both — then skips discovery on every later boot. Build
+// -DPROX_PAIR=0 to re-elect from the MAC every boot on the shared built-in key.
+#ifndef PROX_PAIR
+#define PROX_PAIR 1  ///< 1 = first-boot proximity pairing; 0 = re-elect
+#endif
 #ifndef NODE_ADDR
 #define NODE_ADDR 1          ///< default 1-byte link address (NVS overrides)
 #endif
@@ -105,18 +124,20 @@ static const uint8_t kLinkKey[16] = {
 #ifndef NODE_NAME
 #define NODE_NAME "node"     ///< default board name (NVS overrides)
 #endif
-// Beta defaults: a fresh / factory-reset board boots with COMPRESSION,
-// ENCRYPTION, peer-SNR AUTO-POWER, and ADR ('auto') all on, starting at the
-// 'medium' LoRa mode. (Encryption uses the shared built-in key until AT+TRAIN /
-// proximity pairing derives a unique per-pair key; auto-power holds TX power to
-// the peer's reported demod headroom; ADR adapts the LoRa mode to the link's
-// SNR + retransmit rate.) ADR's old sustained-bulk wedge (entry 28) was a
-// software throttle in the RX task, fixed in entry 29 — ADR now carries bulk
-// byte-exact. Pin a fixed mode with AT+MODE=<name> to opt out. Only the GFSK
-// 'ludicrous' rung stays OPT-IN (AT+ADRGFSK=1): fastest but short-range and
-// RF-sensitive at close bench range, pending field-range validation.
+// Beta defaults: a fresh / factory-reset board boots with COMPRESSION and
+// ENCRYPTION on, at a FIXED 'medium' LoRa mode (SF7/BW250) and full TX power.
+// (Encryption uses the shared built-in key until AT+TRAIN / proximity pairing
+// derives a unique per-pair key.) The two ADAPTIVE features are OFF by default
+// and OPT-IN — field testing showed both still need validation:
+//   - ADR / 'auto' speed (AT+MODE=auto) adapts the LoRa mode to link SNR, but
+//     can wedge in the slowest mode on a marginal link (see the JOURNEY).
+//   - Peer-SNR auto-power (AT+APWR=1) trims TX power to the peer's headroom,
+//     but a mode switch can then leave the faster mode below its demod floor
+//     (the switch keeps the floored power) and revert (see the JOURNEY).
+// Fixed medium + full power is the reliable out-of-box path; enable the two for
+// experimentation. The GFSK 'ludicrous' rung is also opt-in (AT+ADRGFSK=1).
 #ifndef FEAT_DEFAULT
-#define FEAT_DEFAULT (FEAT_COMP | FEAT_ENC | FEAT_APWR | FEAT_ADR)
+#define FEAT_DEFAULT (FEAT_COMP | FEAT_ENC)
 #endif
 
 // Fixed-mode config (radio defaults). Override at build time, e.g.
