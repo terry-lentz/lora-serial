@@ -435,7 +435,10 @@ void Device::LoopInitiator() {
             }
             my_turn = g_link.OnRx(rx, rl, millis());
             if (g_link.TakeValidRx()) last_rx_ms_ = millis();  // real only
-            if (g_link.TakePeerReset()) SessionReset();   // peer rebooted
+            if (g_link.TakePeerReset()) {     // peer rebooted / reset its
+                peer_reset_count_++;          // session (epoch changed) — a
+                SessionReset();               // climbing count flags a flappy
+            }                                 // peer host (see AT+LINK? preset)
             got_frame = true;
             g_radio.LedBlink();     // per-RX-frame activity
             t0 = millis();          // got a frame -> reset deadline (receive

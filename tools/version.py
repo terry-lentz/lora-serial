@@ -5,14 +5,14 @@ in platformio.ini). The firmware version is the single source of truth for
 "which release is this board running", and it comes straight from git so a
 tagged release build and the firmware it produces always agree:
 
-  - clean tagged build      -> the tag exactly (e.g. v0.2.0)
-  - commits past the tag     -> v0.2.0-3-gabc1234 (tag + commits-since + hash)
+  - clean tagged build      -> the tag exactly (e.g. v0.1.2)
+  - commits past the tag     -> v0.1.2-3-gabc1234 (tag + commits-since + hash)
   - uncommitted changes      -> ...-dirty
   - CI without git metadata  -> the release tag env (GITHUB_REF_NAME)
   - no git at all            -> "dev" (the fw_config.h default also covers this)
 
 The value is reported by ATI (fw=...), AT+VER, and the USB boot banner. Releases
-are cut by pushing a semver tag (git tag v0.2.0 && git push --tags); this makes
+are cut by pushing a semver tag (git tag v0.1.2 && git push --tags); this makes
 the flashed firmware self-identify with that exact tag.
 """
 import os

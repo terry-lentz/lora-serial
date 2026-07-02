@@ -62,6 +62,9 @@ uint8_t  g_static_key[16];                     ///< long-term/static AEAD key
 // lives in the static-singleton Device (fw_device.{h,cpp}); these forward to
 // it so the entry points stay trivial.
 // --------------------------------------------------------------------------
+// The diagnostic env:usbprobe build supplies its own setup()/loop() (see
+// src/usb_probe.cpp) and skips all of this; guard so there is one definition.
+#ifndef USB_PHONE_PROBE
 /**
  * @brief Arduino boot entry point; forwards to Device::Setup().
  */
@@ -71,3 +74,4 @@ void setup() { g_device.Setup(); }
  * @brief Arduino main-loop entry point; forwards to Device::Loop().
  */
 void loop()  { g_device.Loop();  }
+#endif  // USB_PHONE_PROBE

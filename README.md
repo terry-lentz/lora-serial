@@ -57,7 +57,12 @@ encryption, and on-device diagnostics. The headlines, and the depth under each:
 - 🔌 **Plug-and-play transparent serial** — each end is a plain USB serial port;
   whatever you write comes out the other side byte-exact, with no host software.
   - Works with `tio`, PuTTY, `screen`, a phone serial app, or point `agetty` at
-    it for a **remote login shell over LoRa**.
+    it for a **remote login shell over LoRa**. Hardware-verified with PuTTY
+    (Windows), Termius (Android and Linux), and the Android *Serial USB Terminal*
+    app. Known exception: **Termius on Windows** reads nothing (it continuously
+    toggles the DTR line instead of holding it, so the device — correctly — never
+    starts sending; a client-side quirk still under investigation). Use PuTTY on
+    Windows.
   - Presents a friendly USB identity (**`LoRa-Serial-XXXX`**, suffix from the
     chip MAC) so two boards plugged into one host are easy to tell apart.
 - 🆔 **Zero-effort setup — no addresses, no pairing required** — flash the
@@ -540,7 +545,7 @@ Like a Hayes dial-up modem, the transparent serial build (`*_raw`) understands a
    |---|---|
    | `AT` | `OK` (link check) |
    | `ATI` | identity: name, address, peer, initiator role, and `fw=` firmware version |
-   | `AT+VER` | firmware version (`fw=…`), stamped from the git tag at build time (`v0.2.0`, or `v0.2.0-3-gabc1234` on a dev build) |
+   | `AT+VER` | firmware version (`fw=…`), stamped from the git tag at build time (`v0.1.2`, or `v0.1.2-3-gabc1234` on a dev build) |
    | `AT+LINK?` | live link state — `rssi`, `snr`, `pwr` (TX dBm), `txq` (queued), `hin`/`hout` (host bytes in/out), `ibuf` (ingest ring KB), `idrop` (overrun bytes), `tx`/`retx` (frames sent/resent), `heap` (free internal SRAM) |
    | `AT+SESSION?` | forward-secrecy status — `session` (1 = a per-session key is active), and a 2-byte fingerprint of the `static` vs `active` key (they differ once the handshake completes). |
    | `AT+DIAG` | crash & health report — boots, **why it last reset** (panic/brownout/watchdog/clean), uptime before that reset, free/min internal SRAM, core-dump presence. See [DIAGNOSTICS.md](./docs/DIAGNOSTICS.md). |

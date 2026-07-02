@@ -95,6 +95,16 @@ class Device {
    */
   uint32_t last_rx_ms() const { return last_rx_ms_; }
   /**
+   * @brief Number of peer session resets seen since boot (peer epoch changes).
+   *
+   * Climbs each time the peer restarts its link session (bumps its epoch) —
+   * e.g. a terminal repeatedly toggling DTR trips the peer's host-reconnect
+   * handling. ~0 on a healthy link; a rising value flags a flappy peer host.
+   * Surfaced as `preset=` in AT+LINK?.
+   * @return the count of detected peer epoch changes.
+   */
+  uint32_t peer_reset_count() const { return peer_reset_count_; }
+  /**
    * @brief Experimental inter-frame TX pacing (ms) inside a burst, set via
    *        AT+TXGAP; a deliberate gap between frames for field experiments.
    * @return the inter-frame pacing in milliseconds (0 = off).
@@ -236,6 +246,10 @@ class Device {
    *        this boot.
    */
   uint32_t last_rx_ms_ = 0;
+  /// Count of detected peer session resets (peer epoch changes) — a climbing
+  /// value flags a peer host that keeps restarting the link (see AT+LINK?
+  /// `preset=`); diagnoses a flappy terminal that toggles DTR.
+  uint32_t peer_reset_count_ = 0;
   /// rate-limit clock: last rendezvous fallback (acts once per its timeout)
   uint32_t last_rendezvous_ms_ = 0;
   /// rate-limit clock: last radio re-init (acts once per its timeout)

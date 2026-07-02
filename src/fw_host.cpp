@@ -14,7 +14,7 @@
 
 #include <cstring>
 
-#include "esp32-hal-tinyusb.h"  // tud_cdc_write: device->host output w/o DTR
+#include "esp32-hal-tinyusb.h"  // tud_cdc_write/_flush/_available/_connected
 #include "esp_heap_caps.h"   // internal-SRAM heap metric for AT+LINK?
 
 #include "autopower.h"  // link_layer::AutoPowerStep — peer-SNR power loop
@@ -378,25 +378,26 @@ void   Host::HtPush(const uint8_t* b, size_t n) {  // caller: HtFree() >= n
     }
 }
 void Host::HostTxDrain() {
-    // Device->host output goes via TinyUSB directly, NOT Serial.write(): the
-    // Arduino USB-CDC layer returns 0 from both write() and availableForWrite()
-    // whenever the host hasn't asserted DTR (they gate on tud_cdc_connected()).
-    // Some hosts open the port and READ without ever raising DTR — notably
-    // several Android serial apps — which starved device->host output entirely
-    // (the link looked one-way). tud_cdc_write() buffers into the CDC FIFO
-    // regardless of DTR; the host receives it the moment it reads. (issue #3)
+    // Device->host output via TinyUSB, GATED on the terminal being open
+    // (tud_cdc_connected() == DTR). Writing to the CDC IN endpoint before a
+    // host opens it wedges the pipe ("stuck busy/claimed", TinyUSB #2572), so
+    // hold off until DTR. This is the EXACT path the usbprobe diagnostic
+    // validated reliable across Termius, PuTTY, and the Serial USB app; the
+    // Arduino Serial.write() layer (ringbuffer + background flush) tested less
+    // reliably, so we ship what we measured. write_available() bounds the copy
+    // so a slow reader never blocks the radio loop.
+    if (!tud_cdc_connected()) return;
     uint32_t room = tud_cdc_write_available();
     while (room > 0 && HtCount() > 0) {
         size_t contig = (ht_head_ >= ht_tail_) ? (ht_head_ - ht_tail_)
                                           : (sizeof(host_tx_) - ht_tail_);
         size_t chunk  = contig < (size_t)room ? contig : (size_t)room;
-        // bounded by room -> won't block
         uint32_t w = tud_cdc_write(host_tx_ + ht_tail_, (uint32_t)chunk);
         ht_tail_ = (ht_tail_ + w) % sizeof(host_tx_);
         if (w < chunk) break;
         room -= w;
     }
-    tud_cdc_write_flush();   // push the FIFO to the host (Serial.write did too)
+    tud_cdc_write_flush();
 }
 
 // Discard any buffered host-bound output when a host (re)connects, so a
@@ -553,7 +554,8 @@ void Host::AtExec(char* line) {
     else if (!strcmp(line, "AT+LINK?")) {
         snprintf(s, sizeof s,
                  "rssi=%.0f snr=%.1f pwr=%d txq=%u hin=%lu hout=%lu ibuf=%uK "
-                 "idrop=%lu tx=%lu retx=%lu reinit=%lu rendz=%lu heap=%luK\r\n"
+                 "idrop=%lu tx=%lu retx=%lu reinit=%lu rendz=%lu preset=%lu "
+                 "heap=%luK\r\n"
                  "OK\r\n",
                  (double)g_radio.rssi(), g_radio.snr(), g_radio.tx_power(),
                  (unsigned)g_link.TxPending(), (unsigned long)host_in_,
@@ -563,6 +565,7 @@ void Host::AtExec(char* line) {
                  (unsigned long)g_link.DbgStatRetx(),
                  (unsigned long)g_device.reinit_count(),
                  (unsigned long)g_device.rendezvous_count(),
+                 (unsigned long)g_device.peer_reset_count(),
                  (unsigned long)(
                      heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
         AtReply(s);
