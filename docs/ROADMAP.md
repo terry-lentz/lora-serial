@@ -17,7 +17,7 @@ modems that transparently pass data" — shipped as mature hardware + firmware
 | **Dedicated 1 W hardware** | Purpose-built modem: **30 dBm** PA, enclosure, screw terminals, antenna | Runs on generic dev boards at **22 dBm** → less range, no enclosure |
 | **Frequency hopping (FHSS)** | Automatic channel hopping: collision avoidance, regulatory dwell-time, coexistence, harder to intercept/jam | Single fixed channel (see FHSS note below for why) |
 | **Multipoint broadcast** | One-to-many, not just P2P | Strictly point-to-point (by design) |
-| **Training mode** | Button press on both → random network ID + shared AES key, no manual config | Hardcoded key today; secure pairing planned (below) |
+| **Training mode** | Button press on both → random network ID + shared AES key, no manual config | **Secure pairing done** — `AT+TRAIN` (X25519 ECDH) + first-boot proximity auto-pair derive a unique per-pair key; the built-in key is only a fallback |
 | **Field maturity** | Years of use, polished manual, product support | Young; bench + early field tested |
 | **Turnkey product** | Buy a finished unit; download/flash | Open firmware + CI release binaries; no hardware product |
 
@@ -35,8 +35,8 @@ modems that transparently pass data" — shipped as mature hardware + firmware
 
 **Summary:** SparkFun LoRaSerial leads on range and turnkey hardware; this project
 leads on modern security, raw speed, hardware flexibility, and host-overrun
-robustness on cheap boards. The main functional gaps are **FHSS**, **secure
-pairing**, and **field maturity**.
+robustness on cheap boards. The main functional gaps are now **FHSS** and
+**field maturity** (secure pairing has since landed — see below).
 
 ---
 
@@ -65,10 +65,20 @@ Roughly in priority order. Checked items are done.
     becomes worthwhile for the US ISM band at high power, or genuinely congested spectrum.
 - [ ] **Duty-cycle / dwell-time enforcement** for regulatory compliance (ties into
   FHSS). Today the cadence is bench-oriented.
-- [x] **Adaptive Data Rate (ADR)** — `AT+MODE=auto`: the initiator picks the
-  fastest mode the link supports from measured SNR and coordinates both ends via
-  a make-before-break handshake. Sim-tested **and hardware-validated** (climbed to
-  turbo, responder followed, byte-exact). See [FUTURE_MODES.md](./FUTURE_MODES.md).
+- [x] **Coordinated mode switching** — `AT+MODE=<name>` drives a make-before-break
+  handshake so both ends move together (with probation auto-revert + a dead-link
+  rendezvous). Sim-tested and hardware-validated, byte-exact across switches.
+  This is the solid foundation the adaptive features build on.
+- [~] **Adaptive Data Rate (ADR)** — `AT+MODE=auto` layers SNR/loss-driven mode
+  *picking* on top of that handshake. Built + sim-tested + bench-tested, but
+  **opt-in and off by default**: field testing found it can wedge in the slowest
+  mode on a marginal link (the switch-instant power transient — journey entry
+  34), so it needs more field validation before it can ship on. See
+  [FUTURE_MODES.md](./FUTURE_MODES.md).
+- [~] **Auto TX-power** (`AT+APWR=1`) — a peer-SNR closed-loop that trims each
+  side's power to the link's headroom; built + sim-tested, also **opt-in /
+  experimental** (off by default) pending the same field validation. Novel for
+  point-to-point LoRa (LoRaWAN power control is network-server-driven).
 - [x] **Per-mode BDP window + ToA-derived timing** — done.
 - [x] **Host-overrun safety (PSRAM ingest ring)** — done.
 
@@ -79,35 +89,50 @@ Roughly in priority order. Checked items are done.
   fingerprint, stored in NVS (survives reflash). Replaces the built-in key. Validated
   on hardware (matching fingerprint + byte-exact transfer on the derived key). Caveat:
   *unauthenticated* ECDH — pair in proximity, compare the fingerprint (MITM check).
-- [ ] (superseded plan, kept for context) Original training-mode note: an
-  `AT+TRAIN` (and/or button) on both ends runs an **X25519 ECDH** key agreement
-  over the air, deriving a shared key that is **never transmitted** — strictly
-  better than sharing a key over the air, since an eavesdropper can't derive the
-  secret from the exchanged public keys. Persist the derived key in NVS. (Tracked;
-  ties to SECURITY.md "Fix D".)
 - [~] **Forward secrecy** — crypto built + unit-tested (per-session **ephemeral
   X25519** + Ascon KDF; a minimal construction, not the literal Noise framework), but
   **opt-in / experimental** (`AT+FS=1`, off by default). The on-air handshake currently
   runs outside the proven turn rhythm and interferes with runtime mode switching;
   hardening it (carry the ephemeral keys as link-layer payload) is the remaining work.
   See `lib/linklayer/session.h`, `AT+FS`/`AT+SESSION?`, and SECURITY.md "Fix D".
-- [ ] **Per-device key provisioning** — flashed/provisioned secret instead of one
-  firmware key. Could be a flash-time step or the training mode output.
+- [~] **Per-device key provisioning** — first-boot **proximity pairing** now
+  auto-derives and persists a unique **per-pair** key (the shared firmware key is
+  only a fallback until then), so a pair no longer runs on one shared firmware
+  key. A true per-*device* factory-provisioned identity key remains possible as a
+  flash-time step.
 - [x] **AEAD + NVS nonce counter + replay window** — done.
 
 ### Code quality & packaging
-- [x] **Modularize `main.cpp`** — split into `fw_config.h` (shared contract),
-  `fw_radio.{h,cpp}`, `fw_host.{h,cpp}`, and `main.cpp`; headers declare, `.cpp` files
-  implement.
+- [x] **Modularize `main.cpp`** — split into per-subsystem static-singleton
+  classes: `fw_config.h` (shared contract), `fw_radio` (radio/ISR/modes),
+  `fw_host` (USB↔link, AT, pairing, NVS), `fw_diag` (watchdogs/crash), `fw_device`
+  (orchestration: setup/loop, roles, recovery, ADR), and `fw_session` (forward
+  secrecy), with `main.cpp` the slim composition root; headers declare, `.cpp`
+  files implement.
 - [x] **Documented coding standard** — follows the Google C++ Style Guide
   (PascalCase functions/types, snake_case vars, `kConstant`, `ALL_CAPS` macros), with
   embedded carve-outs; ≤80-column rule enforced via `make format-check`. See
   [CODING_STANDARDS.md](./CODING_STANDARDS.md). Magic numbers extracted to named
   constants; AT commands commented.
 - [x] **Standard build** — top-level `Makefile` wrapping PlatformIO.
-- [ ] **Modernize the C++ further** (where zero-cost on embedded): `enum class`,
-  `std::span`/`string_view` for buffer params, `[[nodiscard]]`; bump to C++20.
-  Deliberately keep heap-heavy STL out of the frame/ring hot paths.
+- [ ] **Raise the language standard to C++20 + adopt the zero-cost modern subset**
+  (`enum class`, `std::span`/`string_view` for buffer params, `[[nodiscard]]`).
+  - **Where we are, and why.** The project began as an Arduino/PlatformIO ESP32
+    sketch, and the arduino-esp32 core compiles sketches at its long-standing
+    default of **`-std=gnu++11`** — so the firmware, and therefore everything in
+    `lib/linklayer/` it pulls in, is held to **C++11** today. The native test
+    env is separately pinned to **C++17** (`-std=gnu++17`), so the portable code
+    targets the *intersection*: C++11-clean for anything the firmware compiles,
+    C++17-isms only in native-only test code. C++11 + templates + `constexpr`
+    already covers the static-allocation, no-heap design (rule 5), so nothing has
+    forced a bump — the modern-C++ features above simply aren't reachable yet.
+  - **The plan to reach C++20.** (1) Override the firmware standard in
+    `platformio.ini` (`build_unflags = -std=gnu++11`, add `-std=gnu++2a`) and
+    confirm the arduino-esp32 / ESP-IDF headers still build; (2) raise the native
+    env to `-std=gnu++20` so tests and firmware agree on one standard; (3) adopt
+    the zero-cost subset in `lib/linklayer/` one construct at a time, native
+    suite green at each step. Heap-heavy STL stays out of the frame/ring hot
+    paths regardless (rule 5).
 - [x] **CI** — native tests + build all variants on every push/PR.
 - [x] **Release binaries** — tagged releases publish flashable factory images.
 - [x] **LICENSE (MIT) + CONTRIBUTING + docs reorg + radio primer** — done.
@@ -129,9 +154,18 @@ Roughly in priority order. Checked items are done.
 
 ## Suggested order of work
 
-1. **Modularize + modernize the firmware** — split `main.cpp` into focused modules and
-   adopt the zero-cost modern-C++ subset; the native test suite guards the refactor.
-2. **Secure pairing (`AT+TRAIN`)** — removes the hardcoded-key weakness (the most-cited
-   maturity gap) and is a stepping stone to forward secrecy.
-3. **FHSS** — the largest RF feature gap; a bigger effort, best done after the refactor
-   so it lands in clean modules (and see the note above on why it is low priority here).
+The modularization and secure pairing are **done** (see the checklist above);
+what remains, roughly in order:
+
+1. **Field range testing** — validate the estimated per-mode ranges, and the two
+   experimental adaptive features (ADR + auto-power), at real line-of-sight range;
+   log RSSI/SNR vs distance. This is the gate to shipping the adaptive modes on by
+   default.
+2. **Harden forward secrecy** — carry the ephemeral X25519 keys as link-layer
+   payload so the handshake runs inside the proven turn rhythm (SECURITY.md
+   "Fix D"), so it can move from opt-in to default.
+3. **C++ modernization + hardware guide** — the remaining code-quality and
+   packaging items above (raise the language standard to C++20 and adopt the
+   zero-cost subset; a BOM / wiring / antenna guide).
+4. **FHSS** — the largest RF feature gap; a bigger effort, and see the note above
+   on why it is low priority for our narrow band.

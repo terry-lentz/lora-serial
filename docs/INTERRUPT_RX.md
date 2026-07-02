@@ -1,126 +1,115 @@
 # Interrupt-driven RX — design
 
-**Goal:** drain the SX1262 RX FIFO *promptly* on the DIO1 interrupt so back-to-back
-burst frames don't overrun it — which makes **continuous RX** safe, which kills the
-per-frame re-arm deaf window, which is the only way to reach the README throughput.
+Interrupt-driven receive is the firmware's **shipping RX path**: the SX1262's
+DIO1 interrupt drives a high-priority task that drains the RX FIFO into a
+lock-free ring, and the main loop consumes it. It is **unconditional** (no build
+flag) and hardware-validated **byte-exact across every mode**, GFSK `ludicrous`
+included. This document is the design as it ships; the long road to it — a
+"responder goes deaf" chase that turned out to be a chip errata plus a loose
+board-to-board connector, *not* this architecture — is in
+[CAPABILITIES_JOURNEY.md](./CAPABILITIES_JOURNEY.md) entries 20, 22–23, and
+28–29.
 
-**Status:** implemented behind `INTR_RX` (default OFF); per-frame polling ships.
+## Why interrupt-driven
 
-## Update 2026-06-30 — research-validated, but two paths now exist
-
-Research into Meshtastic (`SX126xInterface`/`RadioLibInterface`) and RNode
-(`sx126x.cpp`) **confirms this architecture is the proven one**: both run
-**continuous RX (`RX_TIMEOUT_INF`)**, **interrupt-driven**, re-armed in a worker
-(Meshtastic) / left continuous (RNode), with the ISR doing only a notify. So the
-radio-task design below is correct — the responder "hang" we chased was **not** the
-task: it was a **wedged SX1262** (`CHIP_NOT_FOUND`) caused by calling RadioLib
-`resetAGC()` (warm `sleep()`) in the RX path. See CAPABILITIES_JOURNEY 22.
-
-Two receive paths now coexist, both flag-gated, both **default OFF** (per-frame
-ships):
-
-1. **`RX_CONTINUOUS`** — *main-loop* continuous RX: re-arm `standby()`+`startReceive()`
-   **before** the caller processes the frame, so the radio listens during `OnRx`.
-   Single-threaded (no task, no mutex), the **simplest** way to shrink the deaf
-   window. Test this first — lowest risk.
-2. **`INTR_RX`** — the radio-task design in this doc (ISR → task → SPSC ring →
-   main loop). Higher performance under burst (prompt FIFO drain), more moving
-   parts. The proven Meshtastic/RNode shape.
-
-Both are **UNVALIDATED on hardware** (the wedge invalidated the earlier tests).
-Lessons folded in for whoever validates:
-- **Do NOT add `resetAGC()` blind.** If desense recovery is needed, use Meshtastic's
-  *guarded* recipe (never mid-packet, re-apply reg `0x08B5` bit 0 after calibrate) —
-  see docs/RADIO_ERRATA.md. Our close-range desense is better fixed by **lower TX
-  power** (CAPABILITIES_JOURNEY 21).
-- **Add a missed-IRQ poll backup** (Meshtastic `pollMissedIrqs`/`checkRxDoneIrqFlag`):
-  DIO1 is edge-triggered and the ESP32 can drop edges. The per-frame path already
-  polls `RADIOLIB_IRQ_RX_DONE` every `kIrqPollMs`; the `INTR_RX` task's `kRxRearmMs`
-  wakeup is a coarse equivalent — make it finer if frames are missed.
-- Keep the **reboot watchdog** as the last-resort recovery (a `sleep()`-wedged chip
-  only recovers on power-cycle/reboot).
-
-## Why the current polling RX wedges (the responder)
-
-- The SX1262 RX FIFO is **256 bytes**; our `MAXFRAME` is **255** → only **one**
-  near-MTU frame fits at a time.
-- The **responder** is the heavy-RX side (it receives the data burst; the initiator
-  only gets sparse ACKs). Under a back-to-back burst it must read each frame out of
-  the FIFO before the next arrives.
-- Today RX is **polling**: `RxWithTimeout()` checks `operation_done` (set by the DIO1
-  ISR) in a `delay(1)` loop, then `readData()`, then the caller decrypts (`OnRx`),
-  then loops. Under load the read can lag a frame → the next frame overruns the FIFO
-  → the radio/loop wedges. Always the responder, never the initiator (sparse RX).
-- Per-frame standby (current default) avoids overrun because the standby+re-arm
-  resets the FIFO each frame and the turn cadence gives time — at the cost of the
-  re-arm deaf window (the ~20-40% retx we measure at high SNR).
-
-RNode and Meshtastic both read on the **interrupt** (ISR → worker), never polling
-the FIFO under load — that's the pattern to adopt.
+- The SX1262 RX FIFO is **256 bytes** and our `MAXFRAME` is **255**, so only
+  **one** near-MTU frame fits at a time — each frame must be read out before the
+  next arrives.
+- The **responder** is the heavy-RX side (it receives the data burst; the
+  initiator gets only sparse ACKs), so under a back-to-back burst it must drain
+  each frame promptly or the next overruns the FIFO.
+- Draining on the **DIO1 interrupt** — rather than polling the FIFO from the
+  main loop, which can lag a frame under load — keeps up with the burst and lets
+  the radio stay in **continuous receive** with no per-frame turn-around wait,
+  so there is no re-arm "deaf window" between frames. This is the same
+  interrupt-driven, continuously-receiving shape Meshtastic (`SX126xInterface`)
+  and RNode (`sx126x.cpp`) use.
 
 ## Architecture
 
 ```
- DIO1 ISR (IRAM, minimal)            radio task (high prio)         main loop (loopTask)
- ----------------------              ----------------------         --------------------
- RxDone -> notifyGive(radioTask) --> wait notify                   turn engine, link,
-                                     take radioMutex               host I/O (unchanged)
-                                     readData() -> frameQueue   --> drain frameQueue ->
-                                     give radioMutex                g_link.OnRx() ...
+ DIO1 ISR (IRAM, minimal)      radio task (high prio)        main loop (loopTask)
+ -----------------------       ----------------------        --------------------
+ RX/TX-done edge:              ulTaskNotifyTake (block)      turn engine, link,
+   operation_done_ = true      Lock(radio_mutex_)            host I/O (unchanged)
+   vTaskNotifyGiveFromISR -->    if RX_DONE:                 Rx() pops rx_ring_ -->
+   portYIELD_FROM_ISR              readData() -> rx_ring_       g_link.OnRx() ...
+                                   standby()+startReceive()
+                                Unlock(radio_mutex_)
 ```
 
-- **DIO1 ISR**: stays minimal/IRAM-safe — `vTaskNotifyGiveFromISR(radioTask,&hpw)`
-  + `portYIELD_FROM_ISR(hpw)`. No SPI in the ISR (RadioLib SPI is flash-resident).
-- **Radio task**: blocks on the notification; on wake, takes `radioMutex`, checks
-  the IRQ flags, and if RX_DONE does `readData()` into a fixed ring of frame buffers,
-  pushes (len, bytes) onto a **FreeRTOS queue** (`xQueueSend`), releases the mutex.
-  It does **not** touch `g_link` — link state stays single-threaded in the main loop.
-- **Main loop**: where it used to call `RxWithTimeout`, it instead `xQueueReceive`s
-  frames (with the same timeout semantics) and feeds them to `g_link.OnRx()` exactly
-  as today. TX is unchanged (`TxFrame` in the main loop).
-- **`radioMutex`**: the one shared hazard is concurrent SPI. The radio task takes it
-  for `readData`; the main loop takes it for `TxFrame`/`startReceive`/`standby`/
-  `reset`. Mutual exclusion = no concurrent SPI. A TxDone notification (same DIO1)
-  is ignored by the task (it checks RX_DONE specifically); TxDone stays main-loop.
+- **DIO1 ISR** (`Radio::OnDio1`, IRAM): the one edge fires for both RX-done and
+  TX-done. It stays minimal and IRAM-safe — it sets `operation_done_` (which
+  `Tx()` watches for TX-done) and wakes the radio task with
+  `vTaskNotifyGiveFromISR` + `portYIELD_FROM_ISR`. **No SPI and no
+  flash-resident calls** (e.g. `digitalWrite`) run here: under heavy interrupt
+  load that crashes the chip, which is why the activity LED is toggled from the
+  main loop, not the ISR.
+- **Radio task** (`Radio::RadioTask`, high priority): blocks on the
+  notification; on wake it takes `radio_mutex_`, and if the IRQ flags show
+  `RX_DONE` (a TX-done edge just wakes it to a no-op) it `readData()`s the frame
+  into the **SPSC frame ring** (`rx_ring_`), caches the packet RSSI (EMA) and
+  SNR under the lock, then **re-arms** receive — a quick `standby()` →
+  `startReceive()` that also resets the AGC between frames (cheap insurance
+  against the SX1262 close-range desense errata). The re-arm runs **after** a
+  completed `RX_DONE`, so it never aborts an in-flight frame, and it carries
+  **no delay** (see the rule below). The task never touches `g_link` — link
+  state stays single-threaded in the main loop.
+- **Main loop** (`Radio::Rx`): where it needs a frame it **pops** `rx_ring_`
+  (the same timeout semantics the old polling `Rx` had) and feeds it to
+  `g_link.OnRx()`. TX is unchanged and stays in the main loop (`Tx`).
+- **`radio_mutex_`** (recursive): the one shared hazard is concurrent SPI to the
+  SX1262. The radio task holds it for `readData` + re-arm; the main loop holds
+  it for `Tx`/`startReceive`/`standby`/`reset`. Mutual exclusion means no
+  concurrent SPI, so no half-driven transaction can wedge the chip.
+
+## The load-bearing rule: keep the FIFO-drain hot path delay-free
+
+**Never put a per-frame delay or yield in the radio task's drain path.** The
+fast back-to-back-burst PHYs — GFSK `ludicrous` and LoRa `turbo` — fire
+`RX_DONE` on almost every wake, so a `vTaskDelay(1)` after each processed frame
+inserts a scheduling gap *between* burst frames; the task can no longer drain +
+re-arm ahead of the next frame, and real frames are dropped or misframed → the
+link goes deaf. (This exact throttle, added while chasing an unrelated bug,
+silently broke `ludicrous` — see JOURNEY entry 29.)
+
+Loop-starvation protection is therefore confined to a **genuine deaf-radio
+backstop**, not a per-frame throttle: a successful frame resets a
+consecutive-failure counter, so ordinary GFSK noise (which mostly passes CRC)
+never trips it. Only after **many consecutive failed reads** (`kRxStormFails`)
+does the task briefly halt RX (`kRxStormBackoffMs`) to give the main loop an
+uncontested window for its stuck-radio recovery, then re-arm. The loop stays fed
+through its own `Rx()` pop path (which pets the watchdog), never a yield in the
+task.
 
 ## Thread-safety summary
 
 | Shared thing | Producer | Consumer | Protection |
 |--------------|----------|----------|------------|
-| radio (SPI)  | radio task (read) + main loop (tx/arm) | — | `radioMutex` (FreeRTOS) |
-| frame queue  | radio task | main loop | FreeRTOS queue (built-in) |
+| radio (SPI)  | radio task (read/re-arm) + main loop (tx/arm) | — | `radio_mutex_` (recursive) |
+| `rx_ring_`   | radio task | main loop (`Rx`) | lock-free **SPSC ring** (`frame_ring.h`) |
 | `g_link`     | main loop only | main loop only | none needed (single-threaded) |
 
-`Radio::rssi_ema_`/counters written by the radio task, read by the main loop
-(via `g_radio.rssi()`): plain word writes (benign races, like
-`operation_done_`).
-
-## Incremental plan (de-risk; flag-gated)
-
-1. **Queue + task scaffolding** (`#if INTR_RX`): create `radioMutex`, the frame
-   ring + FreeRTOS queue, the radio task, and the ISR-notify variant. Unit-test the
-   queue logic natively. No behavior change yet (task drains, main loop still polls).
-2. **Switch the receive path** to consume the queue (`xQueueReceive`) instead of
-   `RxWithTimeout` polling, keeping per-frame standby first (safe), to prove the
-   ISR→task→queue→OnRx path is byte-exact on hardware.
-3. **Add the `radioMutex`** around TX/arm/read and confirm no SPI races (no
-   `CHIP_NOT_FOUND`, no garbled frames) under a speed-test flood.
-4. **Then** enable continuous RX on top (no per-frame standby) — the FIFO now drains
-   promptly, so no overrun. Measure throughput per mode vs per-frame.
-5. Make it the default only after it's solid (byte-exact + no hangs) in **all** modes.
+The SPSC ring is single-producer (the radio task) / single-consumer (the main
+loop), so it needs no lock of its own; a full ring simply **drops** the frame
+and the ARQ layer retransmits it. `Radio::rssi_ema_` / `last_snr_` are written
+by the task and read via `g_radio.rssi()` / `snr()` in the loop — plain word
+writes, benign races like `operation_done_`.
 
 ## Testing
 
-- **Sim-able:** the SPSC frame-queue logic (native unit test); the existing physics
-  sim already shows continuous-RX's ~2.3× upside.
-- **Hardware-only:** the FreeRTOS task + ISR timing + real FIFO behaviour + TX/RX
-  mutex. Validate with the on-device `AT+SPEEDTEST` (per mode) + sustained-flood
-  soak (responder must stay alive). The cm-range bench is bimodal — a cleaner /
-  separated RF setup makes results trustworthy.
-- **Backstop:** the hardware loop TWDT + no-progress reboot remain, so a regression
-  self-recovers instead of needing a manual reflash.
-
-## Fallback
-
-`INTR_RX` (and `RX_CONTINUOUS`) default OFF. Per-frame polling is the shipped path
-until the new path is proven. Both can coexist behind flags during bring-up.
+- **Native (host PC):** the SPSC ring logic is unit-tested in `test/test_link/`
+  — `test_frame_ring_basic` (FIFO order + byte-exact),
+  `test_frame_ring_full_drops` (overflow drops, no corruption),
+  `test_frame_ring_wrap_byte_exact` (index wrap), and
+  `test_frame_ring_oversize_rejected`. The integration sim (`test/test_sim/`)
+  also models the **RX re-arm deaf window** and the **SX1262 AGC lockup** a
+  never-standby receiver would hit, so the "re-arm each frame" choice is
+  exercised in sim.
+- **Hardware:** the FreeRTOS task + ISR timing, real FIFO behaviour, and the
+  TX/RX SPI mutex are validated with `AT+SPEEDTEST` per mode plus a sustained
+  flood soak — byte-exact with no hang or deafness in **every** mode, GFSK
+  included.
+- **Backstop:** the loop task watchdog and the no-progress reboot remain the
+  last-resort recovery, so any regression self-recovers rather than needing a
+  manual reflash.

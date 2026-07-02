@@ -1,8 +1,9 @@
 # Testing & simulation
 
 How this project is tested **without radios** — what the tests cover, how the
-two simulators work, and how to run and extend them. The whole suite runs on a
-plain PC in ~12 seconds: `pio test -e native`.
+three simulators work, and how to run and extend them. The whole suite — **91
+tests** across three simulators — runs on a plain PC in ~20 seconds:
+`pio test -e native`.
 
 ## Why simulate?
 
@@ -52,7 +53,7 @@ pio test -e native -f test_modem    # the faithful half-duplex sim
 
 ## Three complementary simulators
 
-### 1. `test/test_link/` — deterministic in-memory channel (21 tests)
+### 1. `test/test_link/` — deterministic in-memory channel (59 tests)
 
 A fast, **single-threaded** harness. Frames are streamed A→B through an in-memory
 channel that can **drop** frames (both directions) using a seeded PRNG, so a "20 %
@@ -72,6 +73,14 @@ What it covers:
   **nonce-skip-across-reboot** (the counter must never reuse a nonce after a reset).
 - **Pairing (X25519):** RFC 7748 KAT, and a full ECDH + KDF **key-agreement** test
   (both ends derive the same link key).
+- **Identity / role election:** MAC-based initiator election and the **two-board
+  discovery outcome** — exactly one initiator, mutually-agreed and distinct
+  (nonce-safe) addresses — swept over many MAC pairs, so "both boards became
+  initiator" can never originate in the election logic.
+- **Interrupt-RX frame ring:** the lock-free **SPSC ring** (`frame_ring.h`) that
+  carries frames from the radio ISR/task to the main loop — FIFO order +
+  byte-exactness, overflow drops without corruption, index wrap, oversize
+  rejection. (See [INTERRUPT_RX.md](./INTERRUPT_RX.md).)
 
 ### 2. `test/test_modem/` — faithful threaded half-duplex sim (5 tests)
 
@@ -92,7 +101,7 @@ deterministic alternating sim cannot — for example a sender that bursts faster
 the receiver can re-arm. It covers a slow consumer (back-pressure), small and bulk
 echoes, a compressed+encrypted echo, and an echo under loss.
 
-### 3. `test/test_sim/` — integration sim: ADR + mode-switch + radio behaviours
+### 3. `test/test_sim/` — integration sim: ADR + mode-switch + radio behaviours (27 tests)
 
 Builds two full `SimNode`s (real `LinkLayer` + `ModeSwitch` + `AdrController` +
 rendezvous) over a channel that models the **inherent hardware behaviours** we hit
