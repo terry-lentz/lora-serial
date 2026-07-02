@@ -25,7 +25,7 @@
 
 // Firmware version — the single source of truth for "which release is this?".
 // tools/version.py injects -D FW_VERSION="<git describe>" at build time (the
-// exact tag on a release build, e.g. v0.2.0, or v0.2.0-3-gabc1234 on a dev
+// exact tag on a release build, e.g. v0.1.2, or v0.1.2-3-gabc1234 on a dev
 // build past the tag). This default covers a build with no git metadata. It is
 // reported by ATI (fw=...), AT+VER, and the USB boot banner.
 #ifndef FW_VERSION

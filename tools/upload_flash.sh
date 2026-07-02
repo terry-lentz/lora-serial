@@ -51,18 +51,32 @@ ARGS=(--flash_mode keep --flash_freq keep --flash_size keep
       0xe000 "$BOOTAPP"
       0x10000 "$BUILD/firmware.bin")
 
-touch_1200() {
-    echo ">> 1200-baud touch on $PORT to enter bootloader ..."
+enter_bootloader() {
+    echo ">> resetting $PORT into the ROM bootloader (no BOOT button) ..."
     "$PYIO" - "$PORT" <<'PY' || true
 import sys, time, serial
 port = sys.argv[1]
+# Two independent ways to reach the ROM USB-Serial/JTAG bootloader, both relying
+# on the (default-on) USBCDC auto-reset. We do both because either can miss:
+# 1) 1200-baud touch  -> USBCDC _onLineCoding sees 1200 bps -> RESTART_BOOTLOADER.
 try:
     s = serial.Serial(port, 1200)
     s.setDTR(False); time.sleep(0.1)
     s.setRTS(False); time.sleep(0.1)
+    s.close(); time.sleep(0.3)
+except Exception as e:
+    print("1200-touch note:", e)
+# 2) DTR/RTS walk -> USBCDC _onLineState state machine:
+#    IDLE -> !dtr&rts -> dtr&rts -> dtr&!rts -> !dtr&!rts == RESTART_BOOTLOADER.
+#    Proven reliable on this native-USB S3 when the 1200-touch doesn't land;
+#    harmless if we're already in the bootloader (the open just fails or no-ops).
+try:
+    s = serial.Serial(port, 115200)
+    for dtr, rts in ((False, True), (True, True), (True, False), (False, False)):
+        s.setDTR(dtr); s.setRTS(rts); time.sleep(0.2)
     s.close()
 except Exception as e:
-    print("touch note:", e)
+    print("dtr-walk note:", e)
 PY
     # Wait for the ROM bootloader to re-enumerate the port.
     for _ in $(seq 1 20); do [ -e "$PORT" ] && break; sleep 0.25; done
@@ -74,7 +88,7 @@ flash() {  # $1 = --before mode
         --before "$1" --after hard_reset write_flash "${ARGS[@]}"
 }
 
-touch_1200
+enter_bootloader
 echo ">> flashing $ENV -> $PORT ..."
 # After the touch the board sits in the ROM USB-Serial/JTAG bootloader, where
 # esptool's default reset is clean. no_reset is the fallback for the case where

@@ -298,5 +298,15 @@ Current catalog: `upload_flash.sh`, `coredump.sh`, `at.py`, `lora_xfer.py`,
   half-duplex role + 1-byte address auto-elect from the chip MAC at runtime, so
   there is no per-board build. Identify which board is which by `ATI`
   (`initiator=1` is the elected initiator), never by port number.
-  `make flash PORT=/dev/ttyACMx` flashes one board; repeat per port.
+- **ALWAYS flash with `make flash PORT=/dev/ttyACMx` (→ `tools/upload_flash.sh`),
+  NEVER `pio run -t upload` or plain `esptool`.** The XIAO's native USB
+  re-enumerates when the firmware reboots into the bootloader, so esptool's
+  default DTR/RTS auto-reset fails mid-connect (`No serial data received` /
+  `No such device`) — this cost a very long debugging detour once. The tool
+  resets into the ROM bootloader itself (a 1200-baud touch **and** a DTR/RTS
+  reboot-sequence walk) and flashes the stable download port, so it works
+  **button-free** — which matters because the SX1262 hat physically covers the
+  BOOT button. Flash one board per port; repeat for the other. If a flash leaves
+  a board in download mode (it enumerates as `USB JTAG/serial debug unit`), a
+  plain unplug/replug boots the freshly-flashed firmware.
 - Taiwan band: 920–925 MHz.
