@@ -10,13 +10,12 @@
 #ifndef LORA_SERIAL_FW_CONFIG_H_
 #define LORA_SERIAL_FW_CONFIG_H_
 
-#include <Preferences.h>
 #include <RadioLib.h>
-#include <esp_system.h>     // esp_reset_reason(), esp_random()
 // portable windowed-ARQ link layer (compress + AEAD)
 #include "adr.h"            // link_layer::AdrController — 'auto' mode decisions
 #include "linklayer.h"
 #include "modeswitch.h"     // coordinated runtime PHY mode-switch handshake
+#include "platform/prefs.h" // Preferences: NVS on ESP32, stub on nRF52
 #include "x25519.h"         // ECDH for AT+TRAIN secure pairing
 
 // One firmware, flashed to BOTH boards: the initiator/responder role and the

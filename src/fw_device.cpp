@@ -11,8 +11,6 @@
  */
 #include "fw_device.h"
 
-#include "esp_mac.h"     // esp_read_mac — the chip's factory MAC
-
 #include "adr.h"         // link_layer::AdrController — portable ADR decision
 #include "autopower.h"   // link_layer::SnrToAux — report our SNR to the peer
 #include "fw_diag.h"     // g_diag: watchdog pet, no-progress reboot breadcrumb
@@ -20,6 +18,7 @@
 #include "fw_radio.h"    // g_radio: Tx/Rx, ApplyMode, mode helpers, LED
 #include "fw_session.h"  // per-session key handshake (forward secrecy)
 #include "identity.h"    // link_layer::ElectInitiator — MAC-based election
+#include "platform/platform.h"  // platform::DeviceId, platform::Random32
 
 // Single-image safety guard. Both boards flash the SAME node_raw image and
 // MUST auto-elect distinct roles/addresses from their MACs at runtime
@@ -716,7 +715,7 @@ void Device::SendDiscBeacon() {
 // for its peer) until we hear the peer's beacon and elect a role; then set the
 // address/peer/initiator from the MAC compare. Runs after the radio is armed.
 void Device::DiscoverRole() {
-    esp_read_mac(my_mac_, ESP_MAC_WIFI_STA);
+    platform::DeviceId(my_mac_);
     uint8_t rx[link_layer::MAXFRAME]; size_t rl;
     bool elected = false;
     int beacons = 0;
@@ -730,7 +729,7 @@ void Device::DiscoverRole() {
         }
         bool fast = ++beacons <= kDiscFastBeacons;   // back off if alone a bit
         uint32_t window = (fast ? kDiscBaseMs : kDiscSlowMs) +
-            (esp_random() % (fast ? kDiscJitterMs : kDiscSlowJitterMs));
+            (platform::Random32() % (fast ? kDiscJitterMs : kDiscSlowJitterMs));
         if (g_radio.Rx(rx, sizeof rx, rl, window) == RADIOLIB_ERR_NONE &&
             rl == kDiscFrameLen && memcmp(rx, kDiscMagic, 4) == 0 &&
             memcmp(rx + 4, my_mac_, 6) != 0) {         // ignore our own echo
@@ -741,7 +740,7 @@ void Device::DiscoverRole() {
     }
     for (int i = 0; i < kDiscConfirm; i++) {           // help a late peer elect
         SendDiscBeacon();
-        delay(kDiscBaseMs + (esp_random() % kDiscJitterMs));
+        delay(kDiscBaseMs + (platform::Random32() % kDiscJitterMs));
     }
     BG("[BG] discover: initiator=%d addr=%d peer=%d\r\n",
        (int)initiator_, cfg.addr, cfg.peer);

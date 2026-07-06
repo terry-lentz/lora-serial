@@ -39,6 +39,11 @@ extern Preferences prefs;
 // The single diagnostics-layer instance (static singleton; no heap — rule 5).
 Diag g_diag;
 
+// The software-watchdog periodic timer (1 Hz). File-static rather than a class
+// member because its type is ESP-IDF-specific — the portable Diag header can't
+// name it (see fw_diag.h). Created/started in Init(), fires WdtTick().
+static esp_timer_handle_t s_wdt_timer = nullptr;
+
 // --------------------------------------------------------------------------
 // Crash breadcrumb in RTC memory — WHY THIS IS NOT A CLASS MEMBER.
 //
@@ -88,7 +93,7 @@ extern "C" void esp_task_wdt_isr_user_handler(void) {
 }
 
 void Diag::Init() {
-    reason_ = esp_reset_reason();
+    reason_ = (uint32_t)esp_reset_reason();
     bool rtc_valid = (s_rtc_magic == kRtcMagic);
     // Our software watchdog reboots via esp_restart() -> shows as ESP_RST_SW;
     // the RTC flag disambiguates it from a normal reflash/restart.
@@ -112,8 +117,8 @@ void Diag::Init() {
         .dispatch_method = ESP_TIMER_TASK, .name = "lora_wdt",
         .skip_unhandled_events = true,
     };
-    if (esp_timer_create(&args, &wdt_timer_) == ESP_OK)
-        esp_timer_start_periodic(wdt_timer_, 1000000ULL);   // 1 s
+    if (esp_timer_create(&args, &s_wdt_timer) == ESP_OK)
+        esp_timer_start_periodic(s_wdt_timer, 1000000ULL);   // 1 s
 
     // HARDWARE backstop: put the Arduino loop task under the IDF Task Watchdog
     // (CONFIG_ESP_TASK_WDT_PANIC=y here -> reboots on a hang; a panic reboots

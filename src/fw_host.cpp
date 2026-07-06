@@ -22,6 +22,7 @@
 #include "fw_diag.h"    // g_diag.Pet (watchdog) + g_diag.Report (AT+DIAG)
 #include "fw_radio.h"   // g_radio: Tx/Rx, ApplyMode, mode helpers
 #include "fw_session.h" // SessionReset (re-handshake the per-session key)
+#include "platform/platform.h"  // platform::Random32 (pairing/epoch entropy)
 
 // The single host-layer instance (static singleton; no heap — rule 5).
 Host g_host;
@@ -221,7 +222,7 @@ void Host::ApplyLinkConfig() {
     lc.persist_stride = LINK_CTR_STRIDE;
     lc.persist_cb = Host::PersistTxCtr;
     // new boot id -> peer auto-resyncs on reconnect
-    lc.epoch = (uint8_t)(esp_random() & 0xFF);
+    lc.epoch = (uint8_t)(platform::Random32() & 0xFF);
     if (!lc.epoch) lc.epoch = 1;
     g_link.Init(lc);
 }
@@ -287,7 +288,8 @@ bool Host::RunPairing(char* fp /* >= 5 bytes */) {
     void (*saved)() = g_rx_idle_hook; g_rx_idle_hook = nullptr;
 
     uint8_t priv[32], pub[32], peer[32];
-    for (int i = 0; i < 32; i++) priv[i] = (uint8_t)(esp_random() & 0xFF);
+    for (int i = 0; i < 32; i++)
+        priv[i] = (uint8_t)(platform::Random32() & 0xFF);
     x25519::scalarmult_base(pub, priv);
 
     uint8_t frame[kPairFrameLen];
@@ -303,7 +305,8 @@ bool Host::RunPairing(char* fp /* >= 5 bytes */) {
         // never hear each other). A random window per cycle drifts their phases
         // so one is listening while the other transmits. (Same idea as CSMA
         // backoff.)
-        uint32_t win = kPairListenBase + (esp_random() % kPairListenJit);
+        uint32_t win =
+            kPairListenBase + (platform::Random32() % kPairListenJit);
         if (g_radio.Rx(rx, sizeof rx, rl, win) == RADIOLIB_ERR_NONE
             && rl == sizeof frame
             && memcmp(rx, kPairMagic, kPairMagicLen) == 0) {

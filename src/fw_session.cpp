@@ -14,6 +14,7 @@
 #include "fw_config.h"   // cfg, g_link_key, g_static_key, FEAT_ENC
 #include "fw_device.h"   // g_device.initiator() — drives which side we are
 #include "fw_radio.h"    // g_radio.Tx, g_radio.Rx
+#include "platform/platform.h"  // platform::Random32 (session-key entropy)
 #include "session.h"     // link_layer::SessionHandshake
 
 /**
@@ -46,14 +47,14 @@ static bool g_hs_started = false;   ///< have we generated our ephemeral yet?
 /**
  * @brief Fill a buffer with hardware randomness.
  *
- * esp_random() yields 32 bits per call, so this fills four bytes at a time.
+ * platform::Random32() yields 32 bits per call; fills four bytes at a time.
  *
  * @param[out] p  destination buffer. Must not be null.
  * @param[in]  n  number of random bytes to write.
  */
 static void FillRandom(uint8_t* p, size_t n) {
     for (size_t i = 0; i < n; i += 4) {
-        uint32_t r = esp_random();
+        uint32_t r = platform::Random32();
         for (size_t j = 0; j < 4 && i + j < n; j++)
             p[i + j] = (uint8_t)(r >> (8 * j));
     }

@@ -6,18 +6,17 @@
  * Surfaced to the user via the AT+DIAG command. The diagnostics layer is a
  * class (`Diag`), instantiated ONCE as the static global `g_diag` (no heap —
  * see CLAUDE.md rule 5). It owns the captured boot state (reset reason, boot
- * count, pre-crash uptime) and the software-watchdog state (the esp_timer
- * handle and the pet/miss counters) as private members. NOTE the crash
- * breadcrumb lives in RTC_NOINIT memory and CANNOT be a class member — see the
- * long comment in fw_diag.cpp for why. Implementation in fw_diag.cpp.
+ * count, pre-crash uptime) and the software-watchdog pet/miss counters as
+ * private members. Platform-specific state (the periodic-timer handle, the
+ * crash breadcrumb in reset-surviving memory) lives in the per-platform
+ * implementation, not in the class. Implemented per target in
+ * fw_diag_esp32.cpp / fw_diag_nrf52.cpp.
  */
 #ifndef LORA_SERIAL_FW_DIAG_H_
 #define LORA_SERIAL_FW_DIAG_H_
 
 #include <stddef.h>
-
-#include "esp_system.h"   // esp_reset_reason_t
-#include "esp_timer.h"    // esp_timer_handle_t
+#include <stdint.h>
 
 // The diagnostics layer. ONE instance exists, the static global `g_diag`
 // (defined in fw_diag.cpp) — never heap-allocated, so it is deterministic and
@@ -92,14 +91,18 @@ class Diag {
   const char* ReasonStr() const;
 
   // ---- Captured-at-boot state (for reporting) -----------------------------
-  esp_reset_reason_t reason_;        ///< raw last-reset reason from the IDF
+  // The reset code is the platform's own raw value (ESP-IDF esp_reset_reason_t
+  // or the nRF POWER->RESETREAS bits); ReasonStr() — implemented per platform —
+  // maps it to text. Kept as a plain int so this header stays portable.
+  uint32_t reason_ = 0;              ///< raw last-reset code (per platform)
   bool     was_wdt_ = false;         ///< last reset was our software watchdog
   bool     was_noprog_ = false;      ///< last reset was a no-progress reboot
   uint32_t prev_uptime_ms_ = 0;      ///< uptime reached before the last reset
   uint32_t boots_ = 0;               ///< boot count (persisted in NVS)
 
-  // ---- Software-watchdog state (a 1 Hz esp_timer counts missed pets) -------
-  esp_timer_handle_t wdt_timer_ = nullptr;   ///< null until Init() creates it
+  // ---- Software-watchdog state (a 1 Hz timer counts missed pets) ----------
+  // The periodic-timer handle itself is platform-specific and lives as a
+  // file-static in the per-platform implementation, not here.
   volatile bool petted_ = true;              ///< set by Pet(), cleared per tick
   volatile uint32_t misses_ = 0;             ///< consecutive ticks with no pet
 };

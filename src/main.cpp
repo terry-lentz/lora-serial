@@ -27,7 +27,6 @@
  * This file owns the definitions of the shared globals plus setup()/loop(),
  * which just forward to the static-singleton g_device (see fw_device.h).
  */
-#include <Preferences.h>
 #include <RadioLib.h>
 
 #include "fw_config.h"
