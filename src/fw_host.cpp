@@ -14,9 +14,6 @@
 
 #include <cstring>
 
-#include "esp32-hal-tinyusb.h"  // tud_cdc_write/_flush/_available/_connected
-#include "esp_heap_caps.h"   // internal-SRAM heap metric for AT+LINK?
-
 #include "autopower.h"  // link_layer::AutoPowerStep — peer-SNR power loop
 #include "fw_device.h"  // g_device: role, pairing, TX gap, recovery counters
 #include "fw_diag.h"    // g_diag.Pet (watchdog) + g_diag.Report (AT+DIAG)
@@ -348,12 +345,9 @@ void Host::PersistRole() {
 void Host::Emit(const char* s) { AtReply(s); }
 
 void Host::IngestInit() {
-    const size_t WANT = kIngestWantBytes;     // 2 MB if PSRAM is present
-    ingest_ = (uint8_t*)ps_malloc(WANT);
-    if (ingest_) { ingest_cap_ = WANT; return; }
-    ingest_cap_ = kIngestFallBytes;            // fallback: internal RAM
-    ingest_ = (uint8_t*)malloc(ingest_cap_);
-    if (!ingest_) ingest_cap_ = 0;
+    // Prefer a large PSRAM ring; fall back to internal RAM (see platform.h).
+    ingest_ = platform::AllocIngest(kIngestWantBytes, kIngestFallBytes,
+                                    &ingest_cap_);
 }
 
 // Radio-wait idle-hook thunk: forwards to the singleton so host I/O is serviced
@@ -389,18 +383,19 @@ void Host::HostTxDrain() {
     // Arduino Serial.write() layer (ringbuffer + background flush) tested less
     // reliably, so we ship what we measured. write_available() bounds the copy
     // so a slow reader never blocks the radio loop.
-    if (!tud_cdc_connected()) return;
-    uint32_t room = tud_cdc_write_available();
+    if (!platform::HostCdcConnected()) return;
+    uint32_t room = platform::HostCdcWriteAvailable();
     while (room > 0 && HtCount() > 0) {
         size_t contig = (ht_head_ >= ht_tail_) ? (ht_head_ - ht_tail_)
                                           : (sizeof(host_tx_) - ht_tail_);
         size_t chunk  = contig < (size_t)room ? contig : (size_t)room;
-        uint32_t w = tud_cdc_write(host_tx_ + ht_tail_, (uint32_t)chunk);
+        uint32_t w = platform::HostCdcWrite(host_tx_ + ht_tail_,
+                                            (uint32_t)chunk);
         ht_tail_ = (ht_tail_ + w) % sizeof(host_tx_);
         if (w < chunk) break;
         room -= w;
     }
-    tud_cdc_write_flush();
+    platform::HostCdcWriteFlush();
 }
 
 // Discard any buffered host-bound output when a host (re)connects, so a
@@ -570,7 +565,7 @@ void Host::AtExec(char* line) {
                  (unsigned long)g_device.rendezvous_count(),
                  (unsigned long)g_device.peer_reset_count(),
                  (unsigned long)(
-                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+                     platform::FreeInternalHeapKb()));
         AtReply(s);
     }
     // AT+FMODE=<name> — FORCE this mode locally (no handshake, no peer

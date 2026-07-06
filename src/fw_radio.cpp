@@ -226,8 +226,8 @@ void Radio::Reinit() {
     // timeout) and neither feeds the watchdog itself, so without this the
     // recovery itself trips the 5 s task-WDT (the breadcrumb caught it:
     // wedgeop=r, i.e. hung right after the last Rx, in this unmarked re-init).
-    const int kNrstPin = 42;   // SX1262 NRST pin (per Module ctor in main.cpp)
-    const int kNssPin = 41;    // SX1262 NSS pin  (per Module ctor in main.cpp)
+    const int kNrstPin = BOARD_LORA_RST;   // SX1262 NRST (per platform/board.h)
+    const int kNssPin = BOARD_LORA_NSS;    // SX1262 NSS  (per platform/board.h)
     pinMode(kNrstPin, OUTPUT);
     for (int i = 0; i < 3; i++) {    // 3 long pulses to unstick it
         feedLoopWDT();
@@ -541,6 +541,11 @@ void Radio::DeriveTiming() {
 // begin()/beginFSK() resets.
 void Radio::RadioCommonSetup(bool lora_crc) {
     radio.setDio2AsRfSwitch(true);   // Wio-SX1262 RF switch on SX1262 DIO2
+#ifdef BOARD_LORA_RXEN
+    // Boards with a separate RX-enable line (e.g. the Wio Tracker L1) also need
+    // RadioLib to toggle it per TX/RX, alongside the DIO2 switch.
+    radio.setRfSwitchPins(BOARD_LORA_RXEN, RADIOLIB_NC);
+#endif
     if (lora_crc) radio.setCRC(true);
     radio.setDio1Action(Radio::OnDio1);
     // Bound the SPI BUSY-line wait (RadioLib defaults to 1000 ms). If the radio

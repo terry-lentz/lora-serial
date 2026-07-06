@@ -15,6 +15,7 @@
 #include "adr.h"            // link_layer::AdrController — 'auto' mode decisions
 #include "linklayer.h"
 #include "modeswitch.h"     // coordinated runtime PHY mode-switch handshake
+#include "platform/board.h" // per-board SX1262 pins, LED, RF-switch wiring
 #include "platform/prefs.h" // Preferences: NVS on ESP32, stub on nRF52
 #include "x25519.h"         // ECDH for AT+TRAIN secure pairing
 

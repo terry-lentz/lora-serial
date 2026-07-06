@@ -39,10 +39,10 @@ link_layer::LinkLayer<4096>  g_link;          ///< windowed-ARQ link engine
 link_layer::ModeSwitch       g_modesw;        ///< PHY mode-switch state
 link_layer::AdrController     g_adr;          ///< 'auto' mode decision engine
 // Wio-SX1262 board-to-board control pins (SX1262 <-> XIAO ESP32S3).
-static const int     kPinNss  = 41;   // SPI chip-select (NSS)
-static const int     kPinDio1 = 39;   // DIO1 interrupt (RX/TX done)
-static const int     kPinRst  = 42;   // NRST hardware reset
-static const int     kPinBusy = 40;   // BUSY line
+static const int     kPinNss  = BOARD_LORA_NSS;   // SPI chip-select (NSS)
+static const int     kPinDio1 = BOARD_LORA_DIO1;  // DIO1 interrupt (RX/TX done)
+static const int     kPinRst  = BOARD_LORA_RST;   // NRST hardware reset
+static const int     kPinBusy = BOARD_LORA_BUSY;  // BUSY line
 /// The RadioLib Module (SPI + control pins). A NAMED global, not new'd: there
 /// is one radio for the whole run, so it lives statically with no heap (rule
 /// 5). fw_radio.cpp reaches it (extern) to bound the SPI BUSY-line timeout.

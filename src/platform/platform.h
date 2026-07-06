@@ -15,6 +15,7 @@
 #ifndef LORA_SERIAL_PLATFORM_H_
 #define LORA_SERIAL_PLATFORM_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 /// MCU-specific primitives, implemented once per target (see file comment).
@@ -40,6 +41,58 @@ void DeviceId(uint8_t out[6]);
  * @return 32 uniformly-distributed random bits.
  */
 uint32_t Random32();
+
+// ---- Host USB-CDC output (device -> host) --------------------------------
+// The transparent data plane writes to the CDC IN endpoint at this low level
+// (not Arduino Serial.write) so a slow reader can never block the radio loop:
+// HostCdcWriteAvailable() bounds each copy, and output is gated on the terminal
+// actually being open (DTR) — writing before a host opens the port can wedge
+// the pipe. Backed by TinyUSB on both targets.
+
+/**
+ * @brief Whether the host has the CDC port open (DTR asserted).
+ * @return true once a terminal is attached and reading.
+ */
+bool HostCdcConnected();
+
+/**
+ * @brief Bytes the CDC IN endpoint can accept right now without blocking.
+ * @return the free space in the USB TX FIFO.
+ */
+uint32_t HostCdcWriteAvailable();
+
+/**
+ * @brief Enqueue bytes to the host over CDC (non-blocking, up to FIFO room).
+ * @param[in] buf  bytes to send. Must not be null when len > 0.
+ * @param[in] len  number of bytes offered.
+ * @return the number actually accepted (<= len).
+ */
+uint32_t HostCdcWrite(const uint8_t* buf, uint32_t len);
+
+/** @brief Flush the CDC IN endpoint so queued bytes are sent. */
+void HostCdcWriteFlush();
+
+// ---- Memory / diagnostics ------------------------------------------------
+/**
+ * @brief Free internal-RAM heap, in KiB (AT+LINK?/AT+DIAG telemetry).
+ * @return free internal heap in kilobytes.
+ */
+uint32_t FreeInternalHeapKb();
+
+/**
+ * @brief Provide the host->link ingest ring buffer, claimed once at boot.
+ *
+ * Prefers `want` bytes of large/external RAM (PSRAM on the ESP32); if that is
+ * unavailable, returns a smaller internal-RAM buffer of at least `fallback`
+ * bytes. The buffer is never freed (a fixed pre-allocated ring — CLAUDE.md
+ * rule 5).
+ *
+ * @param[in]  want      preferred capacity in bytes (large/external RAM).
+ * @param[in]  fallback  minimum capacity if `want` can't be satisfied.
+ * @param[out] out_cap   the actual capacity provided (0 if allocation failed).
+ * @return pointer to the buffer, or null if none could be provided.
+ */
+uint8_t* AllocIngest(size_t want, size_t fallback, size_t* out_cap);
 
 }  // namespace platform
 

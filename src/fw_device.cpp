@@ -69,8 +69,8 @@ Device g_device;
 // LED, no AT, no coredump, just like an MCU lock-up), bring-up
 // retries forever with escalating resets so the board self-recovers. RST pin =
 // 42 (per the Module ctor in main.cpp).
-static const int      kRadioRstPin  = 42;    ///< SX1262 NRST (per Module ctor)
-static const int      kRadioNssPin  = 41;    ///< SX1262 NSS  (per Module ctor)
+static const int      kRadioRstPin  = BOARD_LORA_RST;  ///< SX1262 NRST
+static const int      kRadioNssPin  = BOARD_LORA_NSS;  ///< SX1262 NSS
 static const uint32_t kNrstHoldMs   = 100;   ///< NRST low to unstick a wedge
 static const uint32_t kNrstSettleMs = 250;   ///< post-reset settle (XOSC/TCXO)
 static const uint32_t kRadioRetryMs = 1200;  ///< gap between bring-up retries

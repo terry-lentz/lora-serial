@@ -13,19 +13,17 @@
 #ifndef LORA_SERIAL_FW_RADIO_H_
 #define LORA_SERIAL_FW_RADIO_H_
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-#include "freertos/task.h"
+#include "platform/rtos.h"  // FreeRTOS + IRAM_ATTR / pinned-create shims
 
 #include "fw_config.h"
 #include "frame_ring.h"   // SPSC ring for the interrupt-driven RX path
 
 /**
- * @brief Activity LED pin — green D1 on the Wio-SX1262 board, GPIO48 via 330R,
- *        active HIGH (per the board schematic). Toggled on every TX-done /
- *        RX-done event, so it flickers during traffic and is steady when idle.
+ * @brief Activity LED pin (per-board; see platform/board.h). Active HIGH;
+ *        toggled on every TX-done / RX-done event, so it flickers during
+ *        traffic and is steady when idle.
  */
-#define LED_PIN 48
+#define LED_PIN BOARD_LED_PIN
 
 // Forward declaration: the ADR ladder type lives in lib/linklayer/adr.h. We
 // only take a pointer to it here, so a forward declare keeps this header light.
