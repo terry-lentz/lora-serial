@@ -528,14 +528,9 @@ own serial-console tools turn it into a remote login with **zero custom code**:
   sudo systemctl enable --now serial-getty@ttyACM0.service
   ```
   This spawns the real **`login` + PAM + your shell** over LoRa. Plain `agetty` is
-  *one-shot* (it exits when you log out). For a **permanent console that respawns
-  after every logout** — e.g. on an Armbian SBC — use the ready-made systemd unit and
-  udev rule in [`deploy/`](./deploy/README.md):
-  ```bash
-  sudo cp deploy/99-lora.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
-  sudo cp deploy/lora-getty@.service /etc/systemd/system/ && sudo systemctl daemon-reload
-  sudo systemctl enable --now lora-getty@lora        # respawns on logout
-  ```
+  *one-shot* (it exits when you log out); for a **permanent console that respawns
+  after every logout**, wrap `agetty -L` in a small `serial-getty@`-style systemd
+  unit + udev rule (the `-L` skips the carrier-detect a plain link doesn't have).
 - **Client end (roaming)** — any terminal: `tio /dev/ttyACM0`, PuTTY, `screen`,
   `minicom`. You get the login prompt.
 

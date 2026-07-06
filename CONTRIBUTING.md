@@ -99,7 +99,6 @@ welcome).
 - `test/` — native unit/integration tests (Unity); see [docs/TESTING.md](./docs/TESTING.md).
 - `docs/` — design, security, throughput, testing, coding standards, research, and
   the radio primer.
-- `deploy/` — systemd unit + udev rule for a permanent login console.
 
 ## Style
 

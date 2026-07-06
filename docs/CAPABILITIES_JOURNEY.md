@@ -66,7 +66,7 @@ for the transport spec, [RESEARCH.md](./RESEARCH.md) for the techniques, and
 | **Client = any plain serial terminal** | No special app on the roaming end — tio, PuTTY, a phone serial app all work. |
 | **AT/`+++` command mode** (Hayes-style) | Configure the radio (power/address) and query live link state (`AT+LINK?` → RSSI/SNR/power) out-of-band from the *same* plain terminal — no host software, no extra wires. Covers the link-state role DCD can't (TinyUSB CDC has no device→host carrier API). |
 | **Unified firmware** (role from address) | One binary for both ends; the lower address auto-initiates → boards are interchangeable, no per-board build. |
-| **OS-native login over LoRa** (`agetty`) | Because the link is a transparent serial port, you point `agetty`/`serial-getty` straight at it for a real PAM login + shell — no project-specific server. systemd unit + udev rule in `deploy/`. |
+| **OS-native login over LoRa** (`agetty`) | Because the link is a transparent serial port, you point `agetty`/`serial-getty` straight at it for a real PAM login + shell — no project-specific server. |
 | **Native simulation test suite (26 tests)** | Loss, reordering, backpressure, compression edges, reconnect resync, SR efficiency, AEAD KAT/replay, X25519 pairing — caught real bugs before hardware. |
 | **Throughput harness + flashing helper + udev rules** | Reproducible benchmarking; button-free flashing over native USB. |
 
