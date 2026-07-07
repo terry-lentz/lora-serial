@@ -255,6 +255,11 @@ void Host::LoadSettings() {
     else
         memcpy(g_static_key, kLinkKey, 16);
     memcpy(g_link_key, g_static_key, 16);
+    // Restore the saved TX power. The radio is already up (setup() runs its
+    // initial ApplyMode before LoadSettings), and ApplyMode preserves power, so
+    // setting it here sticks. Stored as a byte; cast back to signed dBm (< 0 is
+    // legal on the SX1262).
+    g_radio.SetTxPower((int8_t)prefs.getUChar("pwr", (uint8_t)kTxPowerDbm));
 }
 
 void Host::SaveSettings() {
@@ -267,6 +272,17 @@ void Host::SaveSettings() {
     prefs.putUChar("cr", cfg.cr);
     prefs.putFloat("freq", cfg.freq_mhz);
     prefs.putUChar("sync", cfg.sync);
+    prefs.putUChar("pwr", (uint8_t)g_radio.tx_power());   // configured TX power
+}
+
+void Host::KeyFingerprint(char* out, size_t n) {
+    // A short, one-way fingerprint of the paired static key: run it back
+    // through the pairing KDF, show the first 4 bytes. Two units with matching
+    // keys print the same 8 hex chars, so a user can eyeball that they agree —
+    // the key itself never leaves the device (AsconKdf16 is not reversible).
+    uint8_t fp[16];
+    link_layer::AsconKdf16(g_static_key, 16, fp);
+    snprintf(out, n, "%02X%02X%02X%02X", fp[0], fp[1], fp[2], fp[3]);
 }
 
 // Paired = a per-pair key is persisted in NVS. prefs is opened in
@@ -386,7 +402,17 @@ void Host::HostTxDrain() {
     // Arduino Serial.write() layer (ringbuffer + background flush) tested less
     // reliably, so we ship what we measured. write_available() bounds the copy
     // so a slow reader never blocks the radio loop.
-    if (!platform::HostCdcConnected()) return;
+    if (!platform::HostCdcConnected()) {
+        // No terminal has the port open (DTR deasserted). Anything buffered now
+        // is dropped on the next reconnect anyway (CheckHostReconnect), and
+        // letting host_tx_ fill would back-pressure PumpLinkOut and wedge the
+        // whole link — which on a display node ALSO freezes the OLED, since its
+        // teletype is fed from this same ring in HtPush. So discard the ring
+        // instead of holding it: the link keeps flowing and the screen keeps
+        // updating even with nothing reading the serial port.
+        ht_tail_ = ht_head_;
+        return;
+    }
     uint32_t room = platform::HostCdcWriteAvailable();
     while (room > 0 && HtCount() > 0) {
         size_t contig = (ht_head_ >= ht_tail_) ? (ht_head_ - ht_tail_)
@@ -594,6 +620,16 @@ void Host::AtExec(char* line) {
                  g_link_key[0], g_link_key[1]);
         AtReply(s);
     }
+    // AT+KEY? — a short one-way fingerprint of the paired encryption key, to
+    // check two units share the SAME key without exposing it: both ends print
+    // the same 8 hex chars when their keys match (and it changes after AT+TRAIN
+    // re-pairs). Read-only.
+    else if (!strcmp(line, "AT+KEY?")) {
+        char fp[9];
+        KeyFingerprint(fp, sizeof fp);
+        snprintf(s, sizeof s, "key=%s\r\nOK\r\n", fp);
+        AtReply(s);
+    }
     // AT+TXGAP=<ms> / AT+TXGAP? — experimental inter-frame TX pacing, to probe
     // whether a mode's loss is receiver re-arm timing (gap helps) or deeper.
     else if (!strncmp(line, "AT+TXGAP=", 9)) {
@@ -649,8 +685,8 @@ void Host::AtExec(char* line) {
         AtReply("OK\r\n");
     }
     // AT+PWR=dBm — force the radio TX power now (effective on the next frame).
-    // Auto power control (AdjustTxPower) may move it again afterward. Not saved
-    // to NVS. VERIFY the value is legal for your band before field use.
+    // Auto power control (AdjustTxPower) may move it again afterward. Persisted
+    // by AT&W (or a menu change). VERIFY it is legal for your band first.
     else if (sscanf(line, "AT+PWR=%d",  &v) == 1) {
         g_radio.SetTxPower((int8_t)v);
         AtReply("OK\r\n");
@@ -759,7 +795,8 @@ void Host::AtExec(char* line) {
     // Generates <kb> KB internally, measures link drain rate; set AT+SINK=1 on
     // the peer so it absorbs the data. Reports KB/s + retx + snr/rssi/pwr.
     else if (sscanf(line, "AT+SPEEDTEST=%d", &v) == 1) {
-        if (v < 1) v = 1; if (v > 4096) v = 4096;    // clamp 1..4096 KB (4 MB)
+        if (v < 1) v = 1;
+        if (v > 4096) v = 4096;    // clamp 1..4096 KB (4 MB)
         StartSpeedTest((uint32_t)v * 1024);
     }
     // AT+SINK=0|1 — drain+discard received data (no host needed at this end).

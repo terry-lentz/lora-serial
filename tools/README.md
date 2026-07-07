@@ -7,8 +7,8 @@ capability one of these almost has, add it here rather than starting fresh.
 
 | Tool | Purpose |
 |------|---------|
-| `upload_flash.sh <env> <port>` | Flash an ESP32 build over native USB without the BOOT button (1200-baud touch → esptool). |
-| `make_uf2.sh <env> [out.uf2]` | Wrap a built nRF52 `firmware.hex` into a flashable `.uf2` (Adafruit UF2 bootloader, e.g. `wio_l1`); resolves `uf2conv.py` from the installed framework. |
+| `upload_flash.sh [board] [port]` | Flash **either** board over USB — one tool. Pass `xiao` or `l1` (or nothing to auto-detect / interactively pick); dispatches per MCU: XIAO ESP32-S3 → button-free esptool (1200-baud touch), Wio Tracker L1 → nRF52 UF2 drag-drop (auto-mount + copy). `--list` enumerates connected boards; `--help` for usage. |
+| `make_uf2.sh <env> [out.uf2]` | Wrap a built nRF52 `firmware.hex` into a flashable `.uf2` (Adafruit UF2 bootloader, e.g. `wio_l1`); resolves `uf2conv.py` from the installed framework. Called by `upload_flash.sh` for the L1; also usable standalone. |
 | `coredump.sh <env> <port>` | Pull and decode a crash core dump from a board (needs the matching firmware.elf). |
 | `install_nrf52_ldscript.py` | PlatformIO **pre-build hook** (not run by hand): installs the S140 v7 linker script into the nRF52 framework so `wio_l1` links at the right SoftDevice offset. |
 | `at.py <port> <cmd> ...` | Run AT commands (auto `+++` escape) and print the replies. `--until SUBSTR [--timeout SEC]` waits for a delayed result (e.g. a slow-mode `AT+SPEEDTEST`). |
@@ -25,9 +25,11 @@ tools/at.py /dev/ttyACM0 ATI "AT+LINK?" AT+DIAG
 # Pin both ends to a mode and measure throughput A->B (16 KB)
 tools/lora_xfer.py /dev/ttyACM0 /dev/ttyACM1 16384 --mode turbo
 
-# Flash both boards (one env, same image on each — they auto-elect roles)
-tools/upload_flash.sh node_raw /dev/ttyACM0
-tools/upload_flash.sh node_raw /dev/ttyACM1
+# List connected boards, then flash — the tool auto-detects board<->port
+tools/upload_flash.sh --list
+tools/upload_flash.sh              # one board plugged in -> flash it; several -> pick
+tools/upload_flash.sh l1          # flash the Wio Tracker L1 (nRF52 / UF2)
+tools/upload_flash.sh xiao /dev/ttyACM0   # or be fully explicit
 
 # Decode a crash dump (don't rebuild between flashing and decoding)
 tools/coredump.sh node_raw /dev/ttyACM1

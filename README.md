@@ -9,14 +9,14 @@ built from the ground up**: not Meshtastic, not LoRaWAN, with
 and a **Wio Tracker L1** that can show the stream on its OLED (see
 [Supported boards](#supported-boards)).
 
-> **Built with Claude (AI-assisted development).** This wasn't one-shot "vibe
-> coding" — it took several iterations over days, with a lot of direction:
-> architecture, design decisions, coding standards, testing and diagnostic
-> approaches, and the UI, closely guided by me at each step (the working rules
-> are in [CLAUDE.md](./CLAUDE.md)). In practice it was roughly a **10× throughput
-> gain** — work that would have taken 2–3 days took 2–3 hours. Truly remarkable
-> what can be done. Is it 'perfection'? No — but the tradeoff, I believe, is
-> worth it.
+> **Built with Claude (AI-assisted development)** — Claude Opus 4.8 for most of
+> it. This wasn't one-shot "vibe coding" — it took several iterations over days,
+> with a lot of direction: architecture, design decisions, coding standards,
+> testing and diagnostic approaches, and the UI, closely guided at each
+> step (the working rules are in [CLAUDE.md](./CLAUDE.md)). In practice it was
+> roughly a **10× throughput gain** — work that would have taken 2–3 days took
+> 2–3 hours. Truly remarkable what can be done. Is it 'perfection'? No — but the
+> tradeoff, I believe, is worth it.
 
 <table align="center">
 <tr>
@@ -31,11 +31,11 @@ and a **Wio Tracker L1** that can show the stream on its OLED (see
 
 <table align="center">
 <tr>
-<td align="center"><img src="docs/img/l1_markets.jpg" width="250" alt="Wio Tracker L1 MAIN screen: a live MARKETS stock ticker received over LoRa"></td>
-<td align="center"><img src="docs/img/l1_info.jpg" width="250" alt="Wio Tracker L1 INFO screen: frequency, mode, signal, link, uptime"></td>
-<td align="center"><img src="docs/img/l1_config.jpg" width="250" alt="Wio Tracker L1 CONFIG menu: brightness, region, frequency, mode, encryption, compression"></td>
+<td align="center"><img src="docs/img/l1_markets.jpg" width="250" alt="Wio Tracker L1 MAIN screen: a live teletype of text received over LoRa, under a status bar showing frequency, encryption, mode, signal, direction, battery and heartbeat"></td>
+<td align="center"><img src="docs/img/l1_info.jpg" width="250" alt="Wio Tracker L1 INFO screen: encryption, compression, forward-secrecy, ADR-GFSK, key fingerprint and device name"></td>
+<td align="center"><img src="docs/img/l1_config.jpg" width="250" alt="Wio Tracker L1 CONFIG menu: brightness, region, frequency, mode, power, auto-power"></td>
 </tr>
-<tr><td colspan="3" align="center"><sub><i>The <a href="#supported-boards">L1</a>'s three screens — a live feed (here, real stock-ticker data streamed over the link), diagnostics, and the on-device settings menu.</i></sub></td></tr>
+<tr><td colspan="3" align="center"><sub><i>The <a href="#supported-boards">L1</a>'s three screens — a live feed of received text, read-only diagnostics (incl. a key fingerprint you can match across units), and the on-device settings menu.</i></sub></td></tr>
 </table>
 
 <table align="center">
@@ -56,15 +56,19 @@ and a **Wio Tracker L1** that can show the stream on its OLED (see
 
 [![Latest release](https://img.shields.io/github/v/release/terry-lentz/lora-serial?sort=semver&label=latest)](https://github.com/terry-lentz/lora-serial/releases/latest)
 
-Don't want to build from source? Grab the latest release and flash both boards —
-no toolchain required. Both boards run the **same image** and auto-elect their
-roles at boot.
+Don't want to build from source? Grab the latest release and flash both ends.
+Every board runs the **same on-air protocol** and auto-elects its role at boot,
+so **any pair works** — two XIAOs, two L1s, or one of each. The two boards are
+**different chips** (ESP32-S3 vs nRF52840), though, so each takes its **own
+image and flashing method** — there's nothing to auto-detect, just match the
+file to the board:
 
 | Step | What to do |
 |---|---|
-| **1 · Download** | From the **[latest release](https://github.com/terry-lentz/lora-serial/releases/latest)**, download **`lora-serial-<version>.firmware.bin`** (the complete factory image). |
-| **2 · Flash each board** | Open the **[ESP web flasher](https://espressif.github.io/esptool-js/)**, connect a board, and flash that file at offset `0x0`. Repeat for the second board. |
-| **3 · Power on** | That's it — power both boards. They auto-pair and encrypt, then run on the reliable **`medium`** mode at full power; open a serial terminal on each end and start sending. |
+| **1 · Download** | From the **[latest release](https://github.com/terry-lentz/lora-serial/releases/latest)**, grab the image **for each board's chip**: XIAO ESP32-S3 → **`lora-serial-<version>.firmware.bin`**; Wio Tracker L1 → **`lora-serial-<version>.wio_tracker_l1.uf2`**. |
+| **2 · Flash — XIAO ESP32-S3** | Open the **[ESP web flasher](https://espressif.github.io/esptool-js/)**, connect the board, and flash the `.bin` at offset `0x0`. |
+| **2 · Flash — Wio Tracker L1** | **Double-tap the RST button** — a `TRACKER L1` USB drive appears — then **copy the `.uf2`** onto it. No esptool, no toolchain. |
+| **3 · Power on** | Power both ends. They auto-pair and encrypt, then run on the reliable **`medium`** mode at full power; open a serial terminal (or watch the L1's screen) and start sending. |
 
 **Defaults, out of the box** — the pair **auto-pairs** (deriving a unique
 per-pair key on first boot), is **encrypted by default**, and runs at a **fixed
@@ -198,23 +202,30 @@ identical protocol:
 The L1's OLED has three screens; the **user button** cycles between them and the
 **trackball** navigates. A top status bar is on every screen:
 
-<img src="docs/img/l1_statusbar.svg" width="640" alt="Wio Tracker L1 status bar: frequency, encryption padlock, speed/mode, signal strength, TX/RX activity, and a heartbeat that pulses on each received frame">
+<img src="docs/img/l1_statusbar.svg" width="640" alt="Wio Tracker L1 status bar: frequency, encryption padlock, speed/mode, signal strength, a half-duplex direction arrow, a battery gauge, and a heartbeat that pulses on each received frame">
 
 Left to right: the carrier **frequency**, an **encryption** padlock (crossed out
-when off), the **speed/mode**, a **signal**-strength meter, **TX/RX** activity
-arrows, and a **heartbeat** that pulses on each frame received — so if it stops
-and the bars fall to zero, the link has gone quiet.
+when off), the **speed/mode**, a **signal** meter (the measured **SNR margin**
+above the mode's demod floor — what actually predicts decode, not raw RSSI), one
+half-duplex **direction** arrow (up = transmitting, down = receiving; fills solid
+on activity), a **battery** gauge, and a **heartbeat** that pulses on each frame
+received — so if it stops and the bars fall to zero, the link has gone quiet.
 
 - **MAIN** — a live teletype of the received bytes over a 64-line scrollback.
   Roll the trackball up/down to scroll (hold to auto-scroll); a scrollbar shows
   the position, and the view follows new data while it's at the bottom. Renders
   the full CP437 glyph set (box-drawing, arrows, `▲`/`▼`, …).
-- **INFO** — read-only diagnostics: frequency, mode, signal (RSSI/SNR), TX/reTX
-  counts, link state, uptime.
-- **CONFIG** — an on-device settings menu: brightness, region (TW/US/EU),
-  frequency, mode, encryption, compression. Up/down selects a row; **press** to
-  edit, **left/right** change the value, **press** again to save (persisted to
-  flash); the button cancels. Changes apply just like the matching AT command.
+- **INFO** — read-only diagnostics (scroll with up/down): frequency, mode, signal
+  (RSSI/SNR), **battery**, **power** (static dBm or `AUTO`), link state, TX/reTX,
+  uptime, encryption, compression, forward-secrecy, ADR-GFSK, a **key
+  fingerprint** (matches `AT+KEY?` — same on two units means their keys match),
+  and the device name.
+- **CONFIG** — an on-device settings menu (scroll with up/down): brightness,
+  region (TW/US/EU), frequency, mode, **TX power**, **auto-power**, encryption,
+  compression, **forward-secrecy**, **ADR-GFSK**. Up/down selects a row;
+  **press** to edit, **left/right** change the value, **press** again to save
+  (persisted to flash); the button cancels. A mode change coordinates the peer
+  (a spinner shows until it lands); changes apply like the matching AT command.
 
 The L1 uses the same production defaults as the XIAO (encryption + compression,
 role auto-election, first-boot proximity pairing).
@@ -562,6 +573,7 @@ Like a Hayes dial-up modem, the transparent serial build (`*_raw`) understands a
    | `AT+ENC=0\|1` / `AT+COMP=0\|1` | toggle encryption / compression |
    | `AT+FS=0\|1` / `AT+FS?` | toggle **forward secrecy** (per-session ephemeral-key handshake). **Experimental, off by default** — see [SECURITY.md](./docs/SECURITY.md). |
    | `AT+TRAIN` | **secure pairing**: run on *both* ends (same mode) — they agree on a unique key over X25519 ECDH (no secret sent over the air) and print a fingerprint that must match. Stored in NVS, survives reflash. Replaces the built-in key. |
+   | `AT+KEY?` | a short one-way **fingerprint** of the paired encryption key (8 hex chars). The same on two units iff their keys match, so you can confirm a pair agrees **without exposing the key**; changes after `AT+TRAIN`. (Also shown on the L1's INFO screen.) |
    | `AT+PAIR` | **proximity re-pair**: bring the two boards close and run on *both* — they re-discover at low power, re-elect roles, and re-train a fresh key. Same result as `AT+TRAIN` plus role election. See "Pairing & keys" above. |
    | `AT&W` | persist current settings to flash (NVS) — survives reboot **and reflash** |
    | `AT&F` | factory reset: clear NVS to build defaults (also **wipes the paired key**, so the next boot re-pairs / reverts to the built-in key) |

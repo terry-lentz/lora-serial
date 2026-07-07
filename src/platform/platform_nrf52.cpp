@@ -61,6 +61,26 @@ void HostCdcWriteFlush() { Serial.flush(); }
 // Free RAM between the heap top and the stack (Adafruit nRF52 core helper).
 uint32_t FreeInternalHeapKb() { return (uint32_t)dbgHeapFree() / 1024; }
 
+// Battery voltage via the L1's 2:1 divider on PIN_VBAT (P0.31). BAT_READ
+// (P0.04) gates the divider; we drive it HIGH once to enable the read. The
+// SAADC runs 12-bit against the internal 0.6 V reference at 1/6 gain (3.6 V
+// full scale — the variant's AREF_VOLTAGE), so the LiPo voltage is
+// raw/4096 * AREF_VOLTAGE * ADC_MULTIPLIER. Callers should sample sparingly
+// (a few times a second at most), not per display frame.
+uint16_t BatteryMillivolts() {
+  static bool init = false;
+  if (!init) {
+    analogReference(AR_INTERNAL);   // 0.6 V ref x 1/6 gain -> 3.6 V full scale
+    analogReadResolution(12);       // 0..4095
+    pinMode(BAT_READ, OUTPUT);
+    digitalWrite(BAT_READ, HIGH);   // enable the resistor divider
+    init = true;
+  }
+  uint32_t raw = (uint32_t)analogRead(PIN_VBAT);
+  float mv = (float)raw / 4096.0f * AREF_VOLTAGE * ADC_MULTIPLIER * 1000.0f;
+  return (uint16_t)(mv + 0.5f);
+}
+
 // No PSRAM on the nRF52: a fixed internal-RAM ring claimed once at boot (a
 // pre-allocated static buffer — CLAUDE.md rule 5). `want` is ignored; the
 // buffer is sized for the fallback case. 48 KiB fits comfortably in the

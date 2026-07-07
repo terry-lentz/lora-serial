@@ -31,6 +31,8 @@
 #include "fw_device.h"       // g_device.last_rx_ms — the heartbeat edge
 #include "fw_host.h"         // g_host: host_out, ApplyLinkConfig, SaveSettings
 #include "fw_radio.h"        // g_radio: RSSI/SNR, mode table, SetFrequency
+#include "fw_session.h"      // SessionReset — re-handshake on a fwd-sec toggle
+#include "platform/platform.h"  // BatteryMillivolts (battery gauge)
 #include "platform/prefs.h"  // Preferences — persist brightness/region
 
 // The global settings store (defined in main.cpp); used to persist the
@@ -43,10 +45,12 @@ Display g_display;
 // ---- OLED driver (file-static so the header needs no display includes) ------
 static const uint8_t kOledW     = 128;
 static const uint8_t kOledH     = 64;
-// Height of the inverted top bar, shared by every screen so the connection
-// cluster (which reaches down to row 8) keeps the same 2-px margin everywhere —
-// otherwise a shorter bar clips it at the bottom.
-static const uint8_t kBarH      = 11;
+// Height of the inverted top bar, shared by EVERY screen (drawn once, in
+// DrawStatusBar) so it looks identical as you switch screens. 10 px leaves a
+// 1-px margin under the connection cluster (which reaches down to row 8) and a
+// free row (kBarH) below the bar — the black gap that separates it from a
+// highlighted CONFIG/INFO row. Any shorter would clip the cluster.
+static const uint8_t kBarH      = 10;
 static const uint8_t kOledAddrA = 0x3C;   ///< common SH1106 address
 static const uint8_t kOledAddrB = 0x3D;   ///< the L1's panel answers here
 static const int8_t  kOledRst   = -1;     ///< no dedicated reset line
@@ -78,6 +82,12 @@ static const uint32_t kBeatMs  = 160;   ///< heart shown filled this long
 static const uint32_t kFlickMs = 120;   ///< an arrow shown filled this long
 static const uint32_t kStaleMs = 4000;  ///< no RX this long -> "disconnected"
 static const uint16_t kTaskStack = 2048;   ///< task stack depth (words)
+
+// Battery gauge: sample sparingly (the ADC read isn't free and the voltage
+// barely moves), and map a single LiPo cell's usable span to 0..100%.
+static const uint32_t kBattReadMs  = 5000;   ///< re-read the battery this often
+static const uint16_t kBattEmptyMv = 3300;   ///< ~0% (LiPo knee, cut-off soon)
+static const uint16_t kBattFullMv  = 4200;   ///< ~100% (LiPo fully charged)
 
 // 7x7 filled-heart bitmap (MSB-first rows) for the heartbeat.
 static const uint8_t kHeart[] = {0x6C, 0xFE, 0xFE, 0xFE, 0x7C, 0x38, 0x10};
@@ -149,6 +159,19 @@ static const Region kRegions[] = {
 static const uint8_t kNumRegions = sizeof(kRegions) / sizeof(kRegions[0]);
 static const float   kFreqStepMhz = 0.1f;   ///< frequency edit step per click
 
+// TX-power edit range (dBm). The SX1262 PA spans -9..+22 dBm; the config item
+// steps within it (VERIFY the value is legal for your band before field use).
+static const int kPwrMinDbm = -9;
+static const int kPwrMaxDbm = 22;
+
+// CONFIG/INFO rows: below the bar's 1-px gap (kBarH), 9 px apart, 8 px tall.
+// Six fill the 64-px panel exactly (11..63) with no empty strip; longer lists
+// scroll a window this tall to follow the cursor.
+static const uint8_t kRowTop      = kBarH + 1;   // first row y (gap at kBarH)
+static const uint8_t kRowH        = 8;           // row / highlight height
+static const uint8_t kRowsVisible = 6;
+static const uint8_t kInfoCount   = 14;   // read-only INFO rows (see InfoValue)
+
 /**
  * @brief Probe an I2C address for an ACK.
  * @param[in] addr  7-bit address. @return true if a device answered.
@@ -166,17 +189,50 @@ static const char* ModeShort(const char* name) {
   return strcmp(name, "ludicrous") == 0 ? "lud" : name;
 }
 
+// GFSK ('ludicrous') has no LoRa SNR floor, so its meter falls back to RSSI
+// headroom above this approximate sensitivity (dBm).
+static const int kGfskFloorDbm = -106;
+
 /**
- * @brief Map a smoothed RSSI (dBm) to a 0..5 signal-bar count.
- * @param[in] rssi  smoothed RSSI in dBm. @return bars to fill (0..5).
+ * @brief Map dB of link headroom to a 0..5 bar meter.
+ *
+ * "Headroom" is the measured margin above the level where the link fails: for
+ * LoRa, SNR above the mode's demod floor (the very margin ADR watches); for
+ * GFSK, RSSI above sensitivity. It's the honest "is this a good connection"
+ * number — a healthy positive margin means we're decoding with room to spare,
+ * ~0 means we're right on the edge. Thresholds are sized for LoRa SNR margin:
+ * getSNR() saturates near +10 dB, so ~13 dB above the floor is already a
+ * rock-solid link (5 bars) and every mode can reach full bars up close.
+ *
+ * @param[in] margin_db  dB of headroom above the link's failure floor.
+ * @return bars to fill (0..5).
  */
-static int RssiBars(float rssi) {
-  if (rssi >= -55) return 5;
-  if (rssi >= -65) return 4;
-  if (rssi >= -75) return 3;
-  if (rssi >= -85) return 2;
-  if (rssi >= -95) return 1;
+static int BarsFromMargin(int margin_db) {
+  if (margin_db >= 13) return 5;
+  if (margin_db >= 9)  return 4;
+  if (margin_db >= 6)  return 3;
+  if (margin_db >= 3)  return 2;
+  if (margin_db >= 1)  return 1;
   return 0;
+}
+
+/**
+ * @brief Bar count from *measured* link quality, not a datasheet number.
+ *
+ * Uses the last received frame's SNR relative to the current mode's demod floor
+ * — the same headroom the ADR engine trusts to raise or lower the rate — so the
+ * meter tracks the real connection. (Raw RSSI is misleading for LoRa, which
+ * decodes below the noise floor; a solid long-range link can show a weak RSSI.)
+ * GFSK has no SNR floor, so it falls back to RSSI headroom. Only meaningful
+ * once a frame has been heard, so callers gate this on a live link.
+ *
+ * @return bars to fill (0..5).
+ */
+static int SignalBars() {
+  int floor = g_radio.snr_floor();          // 0 on GFSK / unknown config
+  if (floor != 0)
+    return BarsFromMargin((int)g_radio.snr() - floor);
+  return BarsFromMargin((int)g_radio.rssi() - kGfskFloorDbm);
 }
 
 void Display::FeedThunk(const uint8_t* data, size_t len) {
@@ -280,6 +336,18 @@ void Display::PollTrackball() {
     scroll_ = (uint16_t)s;
     return;
   }
+  if (screen_ == kScreenInfo) {
+    // Read-only diagnostics: up/down scroll the list (one row per poll).
+    int dir = (dn > up) ? +1 : (up > dn) ? -1 : 0;
+    if (dir && kInfoCount > kRowsVisible) {
+      int t = (int)info_top_ + dir;
+      int tmax = kInfoCount - kRowsVisible;
+      if (t < 0) t = 0;
+      if (t > tmax) t = tmax;
+      info_top_ = (uint8_t)t;
+    }
+    return;
+  }
   if (screen_ != kScreenConfig) return;
 
   // On CONFIG we step one notch per poll (direction only), so discrete choices
@@ -317,22 +385,29 @@ void Display::PollPress() {
 }
 
 void Display::EnterEdit() {
-  switch (sel_) {
-    case kItemBright: draft_i_ = bright_; break;
-    case kItemRegion: draft_i_ = region_; break;
-    case kItemFreq:   draft_f_ = cfg.freq_mhz; break;
-    case kItemMode: {
-      int m = g_radio.CurrentModeIndex();
-      draft_i_ = (m >= 0) ? m : 0;
-      break;
+  if (const FeatToggle* ft = FeatFor(sel_)) {
+    draft_i_ = (cfg.feat & ft->bit) ? 1 : 0;
+  } else {
+    switch (sel_) {
+      case kItemBright: draft_i_ = bright_; break;
+      case kItemRegion: draft_i_ = region_; break;
+      case kItemFreq:   draft_f_ = cfg.freq_mhz; break;
+      case kItemMode: {
+        int m = g_radio.CurrentModeIndex();
+        draft_i_ = (m >= 0) ? m : 0;
+        break;
+      }
+      case kItemPower:  draft_i_ = g_radio.tx_power(); break;
     }
-    case kItemEnc:  draft_i_ = (cfg.feat & FEAT_ENC) ? 1 : 0; break;
-    case kItemComp: draft_i_ = (cfg.feat & FEAT_COMP) ? 1 : 0; break;
   }
   editing_ = true;
 }
 
 void Display::EditStep(int dir) {
+  if (FeatFor(sel_)) {          // a boolean flag: a step just toggles it
+    draft_i_ = !draft_i_;
+    return;
+  }
   switch (sel_) {
     case kItemBright: {
       int v = draft_i_ + dir;
@@ -358,10 +433,13 @@ void Display::EditStep(int dir) {
       draft_i_ = (draft_i_ + dir + n) % n;
       break;
     }
-    case kItemEnc:
-    case kItemComp:
-      draft_i_ = !draft_i_;   // a step either way just toggles the boolean
+    case kItemPower: {
+      int v = draft_i_ + dir;
+      if (v < kPwrMinDbm) v = kPwrMinDbm;
+      if (v > kPwrMaxDbm) v = kPwrMaxDbm;
+      draft_i_ = v;
       break;
+    }
   }
 }
 
@@ -380,7 +458,9 @@ void Display::ConfirmEdit() {
   // deadlocked the node. Brightness is display-only (I2C we own), so it applies
   // live here; only its persistence defers.
   apply_item_ = sel_;
-  switch (sel_) {
+  if (FeatFor(sel_)) {
+    apply_ival_ = draft_i_;            // a boolean flag: stash 0/1
+  } else switch (sel_) {
     case kItemBright:
       bright_ = (uint8_t)draft_i_;
       SetBrightness(bright_);          // live preview commit (our own I2C)
@@ -394,8 +474,7 @@ void Display::ConfirmEdit() {
       apply_fval_ = draft_f_;
       break;
     case kItemMode:
-    case kItemEnc:
-    case kItemComp:
+    case kItemPower:
       apply_ival_ = draft_i_;
       break;
   }
@@ -404,10 +483,32 @@ void Display::ConfirmEdit() {
 }
 
 void Display::ServiceConfig() {
+  // A coordinated mode switch settles over several frames; persist it once the
+  // radio reaches the target mode (and skip it if the switch reverted on
+  // probation — never save a failed switch).
+  if (mode_save_pending_ && g_radio.CurrentModeIndex() == mode_save_target_) {
+    mode_save_pending_ = false;
+    g_host.SaveSettings();
+  }
   if (!apply_pending_) return;
   apply_pending_ = false;
   // Runs in the MAIN loop — the same single-threaded context the AT commands
   // use — so these radio/link/flash calls can't race the RX task.
+
+  // Boolean feature flags are all applied the same way: flip the bit, run the
+  // item's post-change action, persist (table-driven — see FeatFor).
+  if (const FeatToggle* ft = FeatFor(apply_item_)) {
+    if (apply_ival_) cfg.feat |= ft->bit;
+    else             cfg.feat &= ~ft->bit;
+    switch (ft->action) {
+      case kFeatApplyLink:    g_host.ApplyLinkConfig(); break;
+      case kFeatSessionReset: SessionReset();           break;
+      case kFeatNone:                                   break;
+    }
+    g_host.SaveSettings();
+    return;
+  }
+
   switch (apply_item_) {
     case kItemBright:
       prefs.putUChar("bri", (uint8_t)apply_ival_);
@@ -430,32 +531,59 @@ void Display::ServiceConfig() {
       g_host.SaveSettings();
       break;
     case kItemMode:
-      g_radio.ApplyModeByIndex(apply_ival_);
-      g_host.SaveSettings();
+      cfg.feat &= ~FEAT_ADR;   // pinning a mode disables ADR (like AT+MODE=)
+      if (g_device.initiator()) {
+        // Coordinate the peer through the make-before-break handshake (applying
+        // it only locally would deafen the responder); it settles over a few
+        // frames, so persist once it lands — see the top of this function.
+        if (apply_ival_ != g_radio.CurrentModeIndex()) {
+          g_modesw.Request(apply_ival_);
+          mode_save_target_ = apply_ival_;
+          mode_save_pending_ = true;
+        } else {
+          g_host.SaveSettings();   // already on that mode; just persist
+        }
+      } else {
+        // Responder follows locally; the initiator's peer drives the switch.
+        g_radio.ApplyModeByIndex(apply_ival_);
+        g_modesw.Begin(g_radio.CurrentModeIndex());
+        g_host.SaveSettings();
+      }
       break;
-    case kItemEnc:
-      if (apply_ival_) cfg.feat |= FEAT_ENC;
-      else             cfg.feat &= ~FEAT_ENC;
-      g_host.ApplyLinkConfig();     // reinit the link with the new feature set
-      g_host.SaveSettings();
-      break;
-    case kItemComp:
-      if (apply_ival_) cfg.feat |= FEAT_COMP;
-      else             cfg.feat &= ~FEAT_COMP;
-      g_host.ApplyLinkConfig();
+    case kItemPower:
+      g_radio.SetTxPower((int8_t)apply_ival_);
       g_host.SaveSettings();
       break;
   }
 }
 
+// Boolean value text, shared by the CONFIG rows and the INFO screen.
+static const char* OnOff(bool on) { return on ? "ON" : "OFF"; }
+
+const Display::FeatToggle* Display::FeatFor(uint8_t item) {
+  // The boolean feature rows: label, the FEAT_* bit, and what to re-apply when
+  // it flips. Everything else (render ON/OFF, toggle, enter, confirm,
+  // apply) is identical, so the menu drives them from this one table.
+  static const FeatToggle kToggles[] = {
+    {kItemAutoPwr, "AutoPwr",  FEAT_APWR, kFeatNone},
+    {kItemEnc,     "Encrypt",  FEAT_ENC,  kFeatApplyLink},
+    {kItemComp,    "Compress", FEAT_COMP, kFeatApplyLink},
+    {kItemFS,      "FwdSec",   FEAT_FS,   kFeatSessionReset},
+    {kItemGfsk,    "ADR-GFSK", FEAT_GFSK, kFeatNone},
+  };
+  for (const FeatToggle& t : kToggles)
+    if (t.item == item) return &t;
+  return nullptr;
+}
+
 const char* Display::ItemLabel(uint8_t i) {
+  if (const FeatToggle* ft = FeatFor(i)) return ft->label;
   switch (i) {
     case kItemBright: return "Bright";
     case kItemRegion: return "Region";
     case kItemFreq:   return "Freq";
     case kItemMode:   return "Mode";
-    case kItemEnc:    return "Encrypt";
-    case kItemComp:   return "Compress";
+    case kItemPower:  return "Power";
   }
   return "";
 }
@@ -463,6 +591,11 @@ const char* Display::ItemLabel(uint8_t i) {
 void Display::ItemValue(uint8_t i, char* out, size_t n) {
   static const char* kBrightName[] = {"FULL", "MED", "LOW"};
   bool ed = editing_ && (i == sel_);   // show the draft while editing this row
+  if (const FeatToggle* ft = FeatFor(i)) {
+    bool on = ed ? (draft_i_ != 0) : (cfg.feat & ft->bit) != 0;
+    snprintf(out, n, "%s", OnOff(on));
+    return;
+  }
   switch (i) {
     case kItemBright:
       snprintf(out, n, "%s", kBrightName[ed ? draft_i_ : bright_]);
@@ -474,17 +607,23 @@ void Display::ItemValue(uint8_t i, char* out, size_t n) {
       snprintf(out, n, "%.1f", (double)(ed ? draft_f_ : cfg.freq_mhz));
       break;
     case kItemMode:
-      snprintf(out, n, "%s",
-               g_radio.ModeNameByIndex(ed ? draft_i_
-                                          : g_radio.CurrentModeIndex()));
+      if (ed) {
+        // Editing: preview the draft the trackball is scrolling through.
+        snprintf(out, n, "%s", g_radio.ModeNameByIndex(draft_i_));
+      } else if (mode_save_pending_) {
+        // A coordinated switch is in flight — show the target now (instant
+        // feedback) with a spinner, so the row reads "switching, not confirmed"
+        // until the peer handshake lands (then ServiceConfig clears the flag).
+        static const char kSpin[] = {'|', '/', '-', '\\'};
+        snprintf(out, n, "%s %c", g_radio.ModeNameByIndex(mode_save_target_),
+                 kSpin[(millis() / 150) % 4]);
+      } else {
+        snprintf(out, n, "%s",
+                 g_radio.ModeNameByIndex(g_radio.CurrentModeIndex()));
+      }
       break;
-    case kItemEnc:
-      snprintf(out, n, "%s",
-               (ed ? draft_i_ : (cfg.feat & FEAT_ENC) != 0) ? "ON" : "OFF");
-      break;
-    case kItemComp:
-      snprintf(out, n, "%s",
-               (ed ? draft_i_ : (cfg.feat & FEAT_COMP) != 0) ? "ON" : "OFF");
+    case kItemPower:
+      snprintf(out, n, "%ddB", ed ? draft_i_ : g_radio.tx_power());
       break;
     default:
       if (n) out[0] = 0;
@@ -493,9 +632,10 @@ void Display::ItemValue(uint8_t i, char* out, size_t n) {
 
 void Display::Draw() {
   g_oled.clearDisplay();
-  // The config menu fills the full height (its rows would clip a border), so it
-  // draws borderless; MAIN and INFO keep the framed look.
-  if (screen_ != kScreenConfig)
+  // Only MAIN keeps the frame (it borders the teletype). CONFIG and INFO fill
+  // the full height with six rows, which a border would clip, so they're
+  // borderless.
+  if (screen_ == kScreenMain)
     g_oled.drawRect(0, 0, kOledW, kOledH, SH110X_WHITE);
   switch (screen_) {
     case kScreenInfo:   DrawInfo();   break;
@@ -505,15 +645,85 @@ void Display::Draw() {
   g_oled.display();
 }
 
+// ---- shared status-bar / list helpers (one copy, many callers) -------------
+
+bool Display::Linked() {
+  // A live link = a frame heard from the peer within kStaleMs.
+  return (uint32_t)(millis() - g_device.last_rx_ms()) < kStaleMs;
+}
+
+int Display::BatteryPct() {
+  // Map the last battery read to 0..100% of a LiPo cell's usable span, or -1
+  // when there's no battery-sense divider (batt_mv_ == 0, e.g. the USB XIAO).
+  if (batt_mv_ == 0) return -1;
+  int pct = ((int)batt_mv_ - kBattEmptyMv) * 100 / (kBattFullMv - kBattEmptyMv);
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  return pct;
+}
+
+void Display::DrawStatusBar(const char* label) {
+  // The inverted top bar, drawn identically on every screen: white fill + the
+  // shared connection cluster (top-right). A screen with a single title passes
+  // it as `label` (printed at the left); MAIN passes nullptr and draws its
+  // richer left content (freq/lock/mode) itself.
+  g_oled.fillRect(0, 0, kOledW, kBarH, SH110X_WHITE);
+  g_oled.setTextSize(1);
+  if (label) {
+    g_oled.setTextColor(SH110X_BLACK);
+    g_oled.setCursor(2, 2);
+    g_oled.print(label);
+  }
+  DrawStatusCluster();
+}
+
+void Display::DrawScrollbar(uint8_t top, uint8_t total) {
+  // A thumb on the right margin whose size is the visible fraction and whose
+  // position tracks `top`. No-op when everything fits. The margin is always
+  // black (rows stop 2 px short of it), so a white thumb shows on every row.
+  if (total <= kRowsVisible) return;
+  int track = kOledH - kRowTop;
+  int th = track * kRowsVisible / total;
+  if (th < 4) th = 4;
+  int ty = kRowTop + (track - th) * top / (total - kRowsVisible);
+  g_oled.fillRect(kOledW - 2, ty, 2, th, SH110X_WHITE);
+}
+
+void Display::DrawRow(uint8_t r, const char* label, const char* value,
+                      bool sel, bool edit) {
+  // One CONFIG/INFO row: label flush-left, value right-aligned into a fixed
+  // column (2 px kept clear on the right for the scrollbar). The selected row
+  // inverted; while editing, the value is wrapped in CP437 arrows (◄ ►).
+  int y = kRowTop + r * 9;
+  int right = kOledW - 3;
+  if (sel) {
+    g_oled.fillRect(0, y, right + 1, kRowH, SH110X_WHITE);
+    g_oled.setTextColor(SH110X_BLACK);
+  } else {
+    g_oled.setTextColor(SH110X_WHITE);
+  }
+  g_oled.setCursor(2, y);
+  g_oled.print(label);
+  char disp[24];
+  if (edit) snprintf(disp, sizeof disp, "\x11%s\x10", value);
+  else      snprintf(disp, sizeof disp, "%s", value);
+  int vx = right - (int)strlen(disp) * 6;
+  g_oled.setCursor(vx, y);
+  g_oled.print(disp);
+}
+
 void Display::DrawStatusCluster() {
   // The top-right connection cluster, drawn black on whatever inverted bar the
-  // caller already laid down, so it's present on every screen. Signal meter is
-  // RSSI-driven but forced to zero once the link goes quiet (no RX within
-  // kStaleMs) — it reads "no connection" alongside the heart, which pulses on
-  // each frame received from the peer. The arrows flash on TX/RX activity.
+  // caller already laid down, so it's present on every screen. Left to right:
+  // a measured-SNR signal meter (see SignalBars; forced to zero once the link
+  // goes quiet, so it reads "no connection"), one half-duplex activity arrow, a
+  // battery gauge, and a heartbeat that pulses on each frame received from the
+  // peer. A live link means a frame was just heard, so the SignalBars() and
+  // battery reads are fresh.
   uint32_t now = millis();
-  bool linked = (uint32_t)(now - g_device.last_rx_ms()) < kStaleMs;
-  int bars = (linked && g_radio.have_rssi()) ? RssiBars(g_radio.rssi()) : 0;
+
+  // Signal meter: five ascending bars (x 86..99).
+  int bars = Linked() ? SignalBars() : 0;
   for (int i = 0; i < 5; i++) {
     int h = 3 + i;                    // ascending: 3,4,5,6,7 px
     int x = 86 + i * 3, y = 9 - h;
@@ -522,24 +732,51 @@ void Display::DrawStatusCluster() {
     else
       g_oled.drawRect(x, y, 2, h, SH110X_BLACK);
   }
+
+  // One half-duplex activity arrow (x 101..107). The link is one direction at a
+  // time, so a single arrow says it all: it points the way of the most recent
+  // traffic (up = we transmitted, down = we received) and fills solid while
+  // that direction is active, else it's a hollow outline. This frees the width
+  // the old two-arrow pair took, for the battery gauge.
   bool tx_on = (int32_t)(tx_until_ms_ - now) > 0;
   bool rx_on = (int32_t)(rx_until_ms_ - now) > 0;
-  if (tx_on)
-    g_oled.fillTriangle(104, 8, 110, 8, 107, 2, SH110X_BLACK);
-  else
-    g_oled.drawTriangle(104, 8, 110, 8, 107, 2, SH110X_BLACK);
-  if (rx_on)
-    g_oled.fillTriangle(111, 2, 117, 2, 114, 8, SH110X_BLACK);
-  else
-    g_oled.drawTriangle(111, 2, 117, 2, 114, 8, SH110X_BLACK);
+  bool up;
+  if (tx_on && !rx_on)      up = true;
+  else if (rx_on && !tx_on) up = false;
+  else up = (int32_t)(tx_until_ms_ - rx_until_ms_) > 0;   // tie/idle: recent
+  bool active = tx_on || rx_on;
+  if (up) {                                     // apex up = transmit
+    if (active) g_oled.fillTriangle(101, 8, 107, 8, 104, 2, SH110X_BLACK);
+    else        g_oled.drawTriangle(101, 8, 107, 8, 104, 2, SH110X_BLACK);
+  } else {                                      // apex down = receive
+    if (active) g_oled.fillTriangle(101, 2, 107, 2, 104, 8, SH110X_BLACK);
+    else        g_oled.drawTriangle(101, 2, 107, 2, 104, 8, SH110X_BLACK);
+  }
+
+  // Battery gauge (x 109..119): body outline + terminal nub + proportional
+  // fill. Re-read the ADC only every kBattReadMs (not per frame). A 0 mV read
+  // means the board has no battery sense (the USB-only XIAO) -> no gauge.
+  if (batt_read_ms_ == 0 || (uint32_t)(now - batt_read_ms_) >= kBattReadMs) {
+    batt_mv_ = platform::BatteryMillivolts();
+    batt_read_ms_ = now;
+  }
+  int pct = BatteryPct();
+  if (pct >= 0) {
+    g_oled.drawRect(109, 2, 10, 7, SH110X_BLACK);   // body outline (109..118)
+    g_oled.fillRect(119, 4, 1, 3, SH110X_BLACK);    // terminal nub
+    int fw = pct * 8 / 100;                    // inner fillable width = 8 px
+    if (fw > 0) g_oled.fillRect(110, 3, fw, 5, SH110X_BLACK);
+  }
+
+  // Heartbeat (x 121..127).
   if ((int32_t)(beat_until_ms_ - now) > 0)
-    g_oled.drawBitmap(120, 2, kHeart, 7, 7, SH110X_BLACK);
+    g_oled.drawBitmap(121, 2, kHeart, 7, 7, SH110X_BLACK);
 }
 
 void Display::DrawMain() {
-  // --- inverted status bar (white fill, black content) ---
-  g_oled.fillRect(0, 0, kOledW, kBarH, SH110X_WHITE);
-  g_oled.setTextSize(1);
+  // Shared status bar (fill + cluster); MAIN fills the left with its richer
+  // freq / lock / mode content rather than a single title.
+  DrawStatusBar(nullptr);
   g_oled.setTextColor(SH110X_BLACK);
 
   char freq[8];
@@ -560,8 +797,6 @@ void Display::DrawMain() {
   if (mx < 44) mx = 44;
   g_oled.setCursor(mx, 2);
   g_oled.print(mode);
-
-  DrawStatusCluster();   // signal meter, TX/RX arrows, heartbeat (top-right)
 
   // --- teletype (white on black, below the bar) ---
   // Row r shows the history line (scroll_ + rows-below) slots behind head_. At
@@ -591,80 +826,101 @@ void Display::DrawMain() {
   }
 }
 
-void Display::DrawInfo() {
-  // Inverted title (same bar height as the other screens), then a column of
-  // read-only link/radio diagnostics.
-  g_oled.setTextSize(1);
-  g_oled.fillRect(0, 0, kOledW, kBarH, SH110X_WHITE);
-  g_oled.setTextColor(SH110X_BLACK);
-  g_oled.setCursor(2, 2);
-  g_oled.print("INFO");
-  DrawStatusCluster();   // connection cluster stays put across screens
-  g_oled.setTextColor(SH110X_WHITE);
+// INFO screen rows, in display order (read-only diagnostics). More than fit on
+// the panel, so the list scrolls (info_top_ / trackball up-down on INFO).
+const char* Display::InfoLabel(uint8_t i) {
+  static const char* kLabels[kInfoCount] = {
+    "Freq", "Mode", "Sig", "Batt", "Power", "Link", "TX/reTX",
+    "Uptime", "Encrypt", "Compress", "FwdSec", "ADR-GFSK", "Key", "Name",
+  };
+  return (i < kInfoCount) ? kLabels[i] : "";
+}
 
-  uint32_t now = millis();
-  bool linked = (uint32_t)(now - g_device.last_rx_ms()) < kStaleMs;
-  char ln[24];
-  int y = 13;
-  snprintf(ln, sizeof ln, "Freq  %.1f MHz", (double)cfg.freq_mhz);
-  g_oled.setCursor(3, y); g_oled.print(ln); y += 9;
-  snprintf(ln, sizeof ln, "Mode  %s", g_radio.CurrentModeName());
-  g_oled.setCursor(3, y); g_oled.print(ln); y += 9;
-  if (g_radio.have_rssi())
-    snprintf(ln, sizeof ln, "Sig   %d dBm %d dB", (int)g_radio.rssi(),
-             (int)g_radio.snr());
-  else
-    snprintf(ln, sizeof ln, "Sig   --");
-  g_oled.setCursor(3, y); g_oled.print(ln); y += 9;
-  snprintf(ln, sizeof ln, "TX/reTX  %lu/%lu", (unsigned long)g_link.DbgStatTx(),
-           (unsigned long)g_link.DbgStatRetx());
-  g_oled.setCursor(3, y); g_oled.print(ln); y += 9;
-  snprintf(ln, sizeof ln, "Link  %s   Up %lus", linked ? "UP" : "down",
-           (unsigned long)(now / 1000));
-  g_oled.setCursor(3, y); g_oled.print(ln);
+void Display::InfoValue(uint8_t i, char* out, size_t n) {
+  switch (i) {
+    case 0:
+      snprintf(out, n, "%.1fMHz", (double)cfg.freq_mhz);
+      break;
+    case 1:
+      snprintf(out, n, "%s", g_radio.CurrentModeName());
+      break;
+    case 2:
+      if (g_radio.have_rssi())
+        snprintf(out, n, "%ddBm %ddB", (int)g_radio.rssi(), (int)g_radio.snr());
+      else
+        snprintf(out, n, "--");
+      break;
+    case 3: {
+      int pct = BatteryPct();
+      if (pct < 0) snprintf(out, n, "USB");   // no battery-sense divider
+      else snprintf(out, n, "%u.%02uV %d%%", (unsigned)(batt_mv_ / 1000),
+                    (unsigned)((batt_mv_ % 1000) / 10), pct);
+      break;
+    }
+    case 4:   // static configured power, or AUTO when auto-power is on
+      if (cfg.feat & FEAT_APWR) snprintf(out, n, "AUTO");
+      else snprintf(out, n, "%ddBm", g_radio.tx_power());
+      break;
+    case 5:
+      snprintf(out, n, "%s", Linked() ? "UP" : "down");
+      break;
+    case 6:
+      snprintf(out, n, "%lu/%lu", (unsigned long)g_link.DbgStatTx(),
+               (unsigned long)g_link.DbgStatRetx());
+      break;
+    case 7:
+      snprintf(out, n, "%lus", (unsigned long)(millis() / 1000));
+      break;
+    case 8:  snprintf(out, n, "%s", OnOff(cfg.feat & FEAT_ENC));  break;
+    case 9:  snprintf(out, n, "%s", OnOff(cfg.feat & FEAT_COMP)); break;
+    case 10: snprintf(out, n, "%s", OnOff(cfg.feat & FEAT_FS));   break;
+    case 11: snprintf(out, n, "%s", OnOff(cfg.feat & FEAT_GFSK)); break;
+    case 12:   // one-way fingerprint of the paired key (matches AT+KEY?)
+      g_host.KeyFingerprint(out, n);
+      break;
+    case 13:
+      snprintf(out, n, "%s", cfg.name);
+      break;
+    default:
+      if (n) out[0] = 0;
+  }
+}
+
+void Display::DrawInfo() {
+  // Shared bar + a scrolling window of read-only "label value" rows (up/down on
+  // the trackball scroll it — there are more rows than fit).
+  DrawStatusBar("INFO");
+  for (uint8_t r = 0; r < kRowsVisible; r++) {
+    uint8_t i = info_top_ + r;
+    if (i >= kInfoCount) break;
+    char val[24];
+    InfoValue(i, val, sizeof val);
+    DrawRow(r, InfoLabel(i), val, false, false);
+  }
+  DrawScrollbar(info_top_, kInfoCount);
 }
 
 void Display::DrawConfig() {
-  g_oled.setTextSize(1);
   // Title: normally "CONFIG"; while editing a setting that only works if the
-  // peer matches (freq/mode/enc/comp — local-apply), it warns instead.
+  // peer matches (freq/mode/enc/comp/fs/gfsk — local-apply), it warns instead.
   bool warn = editing_ && (sel_ == kItemFreq || sel_ == kItemMode ||
-                           sel_ == kItemEnc || sel_ == kItemComp);
-  // Borderless (see Draw): full-width title (same bar height as the other
-  // screens), then six rows filling the remaining height. The title text is
-  // kept short so it clears the top-right status cluster.
-  g_oled.fillRect(0, 0, kOledW, kBarH, SH110X_WHITE);
-  g_oled.setTextColor(SH110X_BLACK);
-  g_oled.setCursor(2, 2);
-  g_oled.print(warn ? "match peer" : "CONFIG");
-  DrawStatusCluster();   // connection cluster stays put across screens
+                           sel_ == kItemEnc || sel_ == kItemComp ||
+                           sel_ == kItemFS || sel_ == kItemGfsk);
+  DrawStatusBar(warn ? "match peer" : "CONFIG");
 
-  for (uint8_t i = 0; i < kItemCount; i++) {
-    int y = 11 + i * 9;
-    bool selrow = (i == sel_);
-    if (selrow) {   // highlight the selected row (inverted, full width)
-      g_oled.fillRect(0, y - 1, kOledW, 9, SH110X_WHITE);
-      g_oled.setTextColor(SH110X_BLACK);
-    } else {
-      g_oled.setTextColor(SH110X_WHITE);
-    }
-    g_oled.setCursor(2, y);
-    g_oled.print(ItemLabel(i));
-
-    // Value, right-aligned. While editing this row, wrap it in CP437 arrows
-    // (◄ ►) to show left/right will change it.
+  // Scroll the window so the selection stays visible (more items than rows),
+  // then draw each row and the scrollbar with the shared helpers.
+  if (sel_ < cfg_top_) cfg_top_ = sel_;
+  else if (sel_ >= cfg_top_ + kRowsVisible) cfg_top_ = sel_ - kRowsVisible + 1;
+  for (uint8_t r = 0; r < kRowsVisible; r++) {
+    uint8_t i = cfg_top_ + r;
+    if (i >= kItemCount) break;
     char val[12];
     ItemValue(i, val, sizeof val);
-    char disp[20];
-    if (selrow && editing_)
-      snprintf(disp, sizeof disp, "\x11%s\x10", val);
-    else
-      snprintf(disp, sizeof disp, "%s", val);
-    int vx = kOledW - 2 - (int)strlen(disp) * 6;
-    g_oled.setCursor(vx, y);
-    g_oled.print(disp);
+    bool sel = (i == sel_);
+    DrawRow(r, ItemLabel(i), val, sel, sel && editing_);
   }
-  g_oled.setTextColor(SH110X_WHITE);
+  DrawScrollbar(cfg_top_, kItemCount);
 }
 
 void Display::Task(void*) {

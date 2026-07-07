@@ -57,7 +57,10 @@ current edges:
   future work.
 - **Pairing is unauthenticated.** `AT+TRAIN`'s ECDH has no authentication of its
   own — pair in physical proximity and compare fingerprints to rule out a
-  man-in-the-middle.
+  man-in-the-middle. To check any two units share the same key at a glance, run
+  **`AT+KEY?`** on each: it prints a short one-way fingerprint (`AsconKdf16` of
+  the static key, 8 hex chars) that matches iff the keys match, without ever
+  exposing the key. (The L1 shows the same fingerprint on its INFO screen.)
 - **Forward secrecy is experimental.** Its on-air handshake currently runs outside
   the proven half-duplex turn rhythm, so it can fail to establish and can interfere
   with runtime mode switching — which is why it stays off by default. Check its

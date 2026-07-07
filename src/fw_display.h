@@ -60,10 +60,38 @@ class Display {
     kItemRegion,   ///< frequency region (TW/US/EU) — sets the freq range
     kItemFreq,     ///< carrier frequency (MHz), clamped to the region
     kItemMode,     ///< speed preset (turbo..far/ludicrous)
+    kItemPower,    ///< TX power (dBm)
+    kItemAutoPwr,  ///< auto TX-power (FEAT_APWR) on/off — experimental
     kItemEnc,      ///< encryption on/off
     kItemComp,     ///< compression on/off
+    kItemFS,       ///< forward secrecy (FEAT_FS) on/off
+    kItemGfsk,     ///< ADR may use the GFSK rung (FEAT_GFSK) on/off
     kItemCount     ///< number of items (not an item)
   };
+
+  /// What to re-apply after a boolean feature flag is toggled.
+  enum FeatAction : uint8_t {
+    kFeatApplyLink,     ///< reinit the link with the new feature set
+    kFeatSessionReset,  ///< re-handshake the per-session key
+    kFeatNone           ///< nothing beyond persisting the flag
+  };
+
+  /// A boolean feature-flag config row. The on/off items are identical bar the
+  /// bit they flip and the post-change action, so they're driven by this table
+  /// (see FeatFor) instead of repeating the same case in every menu switch.
+  struct FeatToggle {
+    uint8_t     item;    ///< the ConfigItem this row is
+    const char* label;   ///< menu label
+    uint8_t     bit;     ///< the FEAT_* bit it controls
+    FeatAction  action;  ///< what to re-apply when it changes
+  };
+
+  /**
+   * @brief The FeatToggle for a config item, or null if it isn't a bool flag.
+   * @param[in] item  the ConfigItem index.
+   * @return its FeatToggle, or nullptr for the non-boolean items.
+   */
+  static const FeatToggle* FeatFor(uint8_t item);
 
   /**
    * @brief The refresh task body: drain the byte ring into the teletype, poll
@@ -90,16 +118,63 @@ class Display {
   /**
    * @brief Draw the top-right connection cluster (signal, TX/RX, heartbeat).
    *
-   * Black content over an inverted bar the caller already drew, so it appears
-   * on every screen and stays put as the user switches screens.
+   * Black content over an inverted bar the caller already drew. Called by
+   * DrawStatusBar, so it appears on every screen and stays put across screens.
    */
   void DrawStatusCluster();
+
+  /**
+   * @brief Draw the shared inverted status bar (identical on every screen).
+   * @param[in] label  left-side title (INFO/CONFIG), or null for MAIN which
+   *                   draws its own richer freq/lock/mode content.
+   */
+  void DrawStatusBar(const char* label);
+
+  /**
+   * @brief Draw the right-margin scrollbar thumb for a scrolling list.
+   * @param[in] top    index of the first visible row. @param[in] total  rows.
+   */
+  void DrawScrollbar(uint8_t top, uint8_t total);
+
+  /**
+   * @brief Draw one CONFIG/INFO row: label left, value right-aligned.
+   * @param[in] r      visible row (0..kRowsVisible-1). @param[in] label  left.
+   * @param[in] value  right-aligned value. @param[in] sel  highlight this row.
+   * @param[in] edit   wrap the value in edit arrows (CONFIG, while editing).
+   */
+  void DrawRow(uint8_t r, const char* label, const char* value, bool sel,
+               bool edit);
+
+  /**
+   * @brief Live-link check: a peer frame heard within kStaleMs.
+   * @return true if the link is currently live.
+   */
+  bool Linked();
+
+  /**
+   * @brief Battery charge as a percentage.
+   * @return 0..100, or -1 when the board has no battery sense.
+   */
+  int BatteryPct();
 
   /** @brief Draw the main screen: status bar + scrollable teletype. */
   void DrawMain();
 
   /** @brief Draw the read-only INFO screen (link + radio diagnostics). */
   void DrawInfo();
+
+  /**
+   * @brief Static label for an INFO row.
+   * @param[in] i  the INFO row index (0..kInfoCount-1). @return the label.
+   */
+  static const char* InfoLabel(uint8_t i);
+
+  /**
+   * @brief Format an INFO row's value (right-aligned column).
+   * @param[in]  i    the INFO row index. @param[out] out  buffer.
+   * @param[in]  n    buffer capacity.
+   */
+  void InfoValue(uint8_t i, char* out, size_t n);
 
   /** @brief Draw the CONFIG menu (the editable settings list). */
   void DrawConfig();
@@ -194,10 +269,14 @@ class Display {
   uint32_t tx_until_ms_ = 0;    ///< up arrow shown filled until this millis()
   uint32_t prev_hout_ = 0;      ///< last-seen host-out byte count (down arrow)
   uint32_t rx_until_ms_ = 0;    ///< down arrow shown filled until this millis()
+  uint16_t batt_mv_ = 0;        ///< last battery read (mV); 0 = no batt sense
+  uint32_t batt_read_ms_ = 0;   ///< millis of the last battery ADC sample
 
   // ---- Screen / config-menu state (owned by the task) ----------------------
   Screen  screen_ = kScreenMain;  ///< current screen (main button cycles it)
   uint8_t sel_ = 0;               ///< selected config row (a ConfigItem)
+  uint8_t cfg_top_ = 0;           ///< first visible CONFIG row (scroll window)
+  uint8_t info_top_ = 0;          ///< first visible INFO row (scroll window)
   bool    editing_ = false;       ///< editing the selected row's value
   int     draft_i_ = 0;           ///< in-edit draft for index/bool items
   float   draft_f_ = 0.0f;        ///< in-edit draft for the frequency item
@@ -210,6 +289,11 @@ class Display {
   volatile int     apply_ival_ = 0;      ///< pending integer/bool/index value
   volatile float   apply_fval_ = 0.0f;   ///< pending float value (frequency)
   volatile bool    apply_pending_ = false;  ///< a confirmed change awaits apply
+
+  // A coordinated mode switch (initiator) settles asynchronously; persist it
+  // only once the radio actually reaches the target (see ServiceConfig).
+  bool mode_save_pending_ = false;  ///< a mode switch awaits its settle+save
+  int  mode_save_target_ = 0;       ///< the mode index we're switching to
 
   // ---- Button + trackball-press debounce -----------------------------------
   bool     btn_stable_ = true;  ///< last accepted (released) level

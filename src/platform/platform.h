@@ -97,6 +97,17 @@ void HostCdcWriteFlush();
 uint32_t FreeInternalHeapKb();
 
 /**
+ * @brief Battery voltage in millivolts, for boards with a battery-sense divider.
+ *
+ * The Wio Tracker L1 reads its LiPo through a 2:1 divider on an ADC pin; boards
+ * without battery sensing (e.g. the USB-powered XIAO) return 0 so callers can
+ * treat 0 as "no battery / on USB power".
+ *
+ * @return battery voltage in mV, or 0 if the board has no battery sense.
+ */
+uint16_t BatteryMillivolts();
+
+/**
  * @brief Provide the host->link ingest ring buffer, claimed once at boot.
  *
  * Prefers `want` bytes of large/external RAM (PSRAM on the ESP32); if that is

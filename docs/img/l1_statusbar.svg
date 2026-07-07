@@ -22,10 +22,10 @@
     <circle cx="250" cy="79" r="2" fill="#f4f4f4"/>
   </g>
   <!-- mode / speed -->
-  <text x="352" y="86" font-size="30" font-weight="700"
+  <text x="332" y="86" font-size="30" font-weight="700"
         font-family="ui-monospace, Menlo, Consolas, monospace"
         fill="#0b0b0b">medium</text>
-  <!-- signal meter -->
+  <!-- signal meter (measured SNR margin) -->
   <g fill="#0b0b0b">
     <rect x="520" y="84" width="8" height="10"/>
     <rect x="531" y="78" width="8" height="16"/>
@@ -33,53 +33,64 @@
     <rect x="553" y="66" width="8" height="28"/>
     <rect x="564" y="60" width="8" height="34"/>
   </g>
-  <!-- TX up / RX down arrows -->
-  <path d="M596 90 H612 L604 62 Z" fill="#0b0b0b"/>
-  <path d="M620 62 H636 L628 90 Z" fill="#0b0b0b"/>
+  <!-- single half-duplex direction arrow (down = receiving) -->
+  <path d="M592 60 H616 L604 92 Z" fill="#0b0b0b"/>
+  <!-- battery gauge (outline + terminal nub + partial fill) -->
+  <g fill="none" stroke="#0b0b0b" stroke-width="3">
+    <rect x="630" y="62" width="42" height="26" rx="2"/>
+  </g>
+  <rect x="672" y="70" width="6" height="10" rx="1" fill="#0b0b0b"/>
+  <rect x="634" y="66" width="22" height="18" fill="#0b0b0b"/>
   <!-- heartbeat -->
-  <path d="M690 90 C684 82 675 80 675 72 C675 67 680 64 684 67 C687 69 690 72
-           690 72 C690 72 693 69 696 67 C700 64 705 67 705 72 C705 80 696 82
-           690 90 Z" fill="#0b0b0b"/>
+  <path d="M715 90 C709 82 700 80 700 72 C700 67 705 64 709 67 C712 69 715 72
+           715 72 C715 72 718 69 721 67 C725 64 730 67 730 72 C730 80 721 82
+           715 90 Z" fill="#0b0b0b"/>
 
   <!-- leader lines -->
   <g stroke="#8b949e" stroke-width="1.5" fill="none">
     <path d="M112 104 V150"/>
     <path d="M250 104 V196"/>
-    <path d="M405 104 V150"/>
+    <path d="M380 104 V150"/>
     <path d="M545 104 V196"/>
-    <path d="M614 104 V150"/>
-    <path d="M690 104 V196"/>
+    <path d="M604 104 V150"/>
+    <path d="M651 104 V196"/>
+    <path d="M715 104 V150"/>
   </g>
   <g fill="#8b949e">
     <circle cx="112" cy="104" r="2.5"/>
     <circle cx="250" cy="104" r="2.5"/>
-    <circle cx="405" cy="104" r="2.5"/>
+    <circle cx="380" cy="104" r="2.5"/>
     <circle cx="545" cy="104" r="2.5"/>
-    <circle cx="614" cy="104" r="2.5"/>
-    <circle cx="690" cy="104" r="2.5"/>
+    <circle cx="604" cy="104" r="2.5"/>
+    <circle cx="651" cy="104" r="2.5"/>
+    <circle cx="715" cy="104" r="2.5"/>
   </g>
 
   <!-- labels -->
   <g text-anchor="middle">
+    <!-- upper row -->
     <text x="112" y="168" font-size="15" font-weight="700"
           fill="#f4f4f4">Frequency</text>
     <text x="112" y="185" font-size="12" fill="#9aa4ae">carrier, MHz</text>
-    <text x="405" y="168" font-size="15" font-weight="700"
+    <text x="380" y="168" font-size="15" font-weight="700"
           fill="#f4f4f4">Speed / mode</text>
-    <text x="405" y="185" font-size="12" fill="#9aa4ae">turbo … far</text>
-    <text x="614" y="168" font-size="15" font-weight="700"
-          fill="#f4f4f4">TX / RX</text>
-    <text x="614" y="185" font-size="12" fill="#9aa4ae">activity</text>
+    <text x="380" y="185" font-size="12" fill="#9aa4ae">turbo … lud</text>
+    <text x="604" y="168" font-size="15" font-weight="700"
+          fill="#f4f4f4">Direction</text>
+    <text x="604" y="185" font-size="12" fill="#9aa4ae">up TX · down RX</text>
+    <text x="715" y="168" font-size="15" font-weight="700"
+          fill="#f4f4f4">Heartbeat</text>
+    <text x="715" y="185" font-size="12" fill="#9aa4ae">pulses = alive</text>
 
+    <!-- lower row -->
     <text x="250" y="222" font-size="15" font-weight="700"
           fill="#f4f4f4">Encryption</text>
     <text x="250" y="239" font-size="12" fill="#9aa4ae">crossed = off</text>
     <text x="545" y="222" font-size="15" font-weight="700"
           fill="#f4f4f4">Signal</text>
-    <text x="545" y="239" font-size="12" fill="#9aa4ae">strength (RSSI)</text>
-    <text x="690" y="222" font-size="15" font-weight="700"
-          fill="#f4f4f4">Heartbeat</text>
-    <text x="690" y="239" font-size="12" fill="#9aa4ae">pulses on RX =</text>
-    <text x="690" y="255" font-size="12" fill="#9aa4ae">link alive</text>
+    <text x="545" y="239" font-size="12" fill="#9aa4ae">SNR margin</text>
+    <text x="651" y="222" font-size="15" font-weight="700"
+          fill="#f4f4f4">Battery</text>
+    <text x="651" y="239" font-size="12" fill="#9aa4ae">charge level</text>
   </g>
 </svg>

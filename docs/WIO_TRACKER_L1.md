@@ -49,10 +49,14 @@ The 128×64 OLED shows three screens; the **user button** (D13) cycles between
 them, and the **trackball** navigates. A settings change made on-device is
 applied and persisted exactly like the equivalent AT command.
 
-**Top status bar (all screens):** carrier frequency, an encryption padlock
-(crossed out when off), the mode name, a 5-bar signal meter, TX/RX activity
-arrows, and a heartbeat that pulses on each frame *received* from the peer — so
-if the heart stops and the bars fall to zero, the link has gone quiet.
+**Top status bar (all screens, drawn identically):** carrier frequency, an
+encryption padlock (crossed out when off), the mode name, a 5-bar signal meter
+(the measured **SNR margin** above the mode's demod floor — the real predictor of
+decode, not raw RSSI; RSSI-based on GFSK), a single half-duplex **direction**
+arrow (up = transmitting, down = receiving; hollow when idle, filled on
+activity), a **battery** gauge (read from VBAT; blank on USB power), and a
+heartbeat that pulses on each frame *received* from the peer — so if the heart
+stops and the bars fall to zero, the link has gone quiet.
 
 **MAIN** — a 5-line teletype of the received stream over a 64-line history.
 - **Trackball up/down**: scroll back through history; **hold** to auto-scroll
@@ -63,19 +67,27 @@ if the heart stops and the bars fall to zero, the link has gone quiet.
   `▼`=0x1F, …). It is a transparent byte stream: send plain text; `\n` starts a
   line; only CR/LF/NUL are treated as control.
 
-**INFO** — read-only diagnostics: frequency, mode, signal (RSSI/SNR), TX/reTX
-counts, link up/down, uptime.
+**INFO** — read-only diagnostics (trackball up/down scrolls the list): frequency,
+mode, signal (RSSI/SNR), battery, power (static dBm or `AUTO`), link up/down,
+TX/reTX counts, uptime, encryption, compression, forward-secrecy, ADR-GFSK, a
+**key fingerprint** (matches `AT+KEY?` — the same on two units means their keys
+match), and the device name.
 
-**CONFIG** — an editable settings menu (Brightness, Region, Frequency, Mode,
-Encryption, Compression).
-- **Trackball up/down**: move the selection.
+**CONFIG** — an editable settings menu (scroll with up/down): Brightness, Region,
+Frequency, Mode, TX power, Auto-power, Encryption, Compression, Forward-secrecy,
+ADR-GFSK.
+- **Trackball up/down**: move the selection (the list scrolls; a scrollbar shows
+  the position).
 - **Press**: enter edit (the value is bracketed with `◄ ►`); **left/right**
   change it; **press** again to confirm (apply + save to flash).
 - **User button**: cancel the edit (or, when not editing, go to the next screen).
-- Brightness previews live as you change it. Frequency/mode/encryption/
-  compression are **local** changes — the peer must be set to match (the title
-  shows *“match peer”* while editing them). **Region** (TW/US/EU) sets the
-  frequency range and snaps the carrier into the new band.
+- Brightness previews live as you change it. A **Mode** change *coordinates the
+  peer* (the initiator drives both ends; a spinner shows next to the mode until
+  the switch lands). Frequency/encryption/compression/forward-secrecy/ADR-GFSK
+  are **local** — the peer must be set to match (the title shows *“match peer”*
+  while editing them). **Region** (TW/US/EU) sets the frequency range and snaps
+  the carrier into the new band. TX power and auto-power are local radio
+  settings.
 
 Brightness has three steps (FULL / MED / LOW); LOW drops to the contrast floor
 plus a shortened pre-charge period for a genuinely dim night level.

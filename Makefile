@@ -7,17 +7,20 @@
 # Common usage:
 #   make            # build the firmware image
 #   make test       # run the native unit/sim test suite (no hardware)
-#   make flash PORT=/dev/ttyACM0     # flash a board (repeat for each board/port)
+#   make flash                       # auto-detect & flash the connected board
+#   make flash BOARD=l1              # name a board (xiao|l1) if two are plugged in
 #   make format-check                # fail if any source line exceeds 80 cols
 #   make clean
 #
-# ONE firmware, flashed to BOTH boards — the two ends are identical. Each board
-# auto-elects its half-duplex role (initiator/responder) and its 1-byte address
-# from its chip MAC (+ proximity pairing) at runtime, so you never pick a role
-# or a per-board build. See "Roles: initiator & responder" in the README.
+# Each board runs the image for its chip (xiao -> node_raw, l1 -> wio_l1) and
+# auto-elects its half-duplex role (initiator/responder) + 1-byte address from
+# its chip MAC (+ proximity pairing) at runtime, so you never pick a role or a
+# per-board build — and `make flash` auto-detects which board is on which port.
+# See "Roles: initiator & responder" in the README.
 
 PIO    ?= pio
-PORT   ?= /dev/ttyACM0
+BOARD  ?=                # xiao | l1 (empty = auto-detect from USB identity)
+PORT   ?=                # /dev/ttyACMx (empty = auto-detect from USB identity)
 FLASH  := ./tools/upload_flash.sh
 
 # Source files we hold to the 80-column rule (vendored libs are exempt).
@@ -25,7 +28,7 @@ FMT_FILES := $(wildcard src/*.cpp src/*.h lib/linklayer/*.h lib/linklayer/*.cpp 
                         test/test_link/*.cpp test/test_modem/*.cpp \
                         test/test_sim/*.cpp host/*.py)
 
-.PHONY: all build test flash monitor format-check clean help
+.PHONY: all build test flash boards monitor format-check clean help
 
 all: build
 
@@ -37,13 +40,18 @@ build:
 test:
 	$(PIO) test -e native
 
-## flash: flash a board (override the port with PORT=/dev/ttyXXX; repeat/board)
+## flash: auto-detect & flash the connected board (BOARD=xiao|l1, PORT=/dev/ttyXXX
+## to narrow it when several are plugged in). `tools/upload_flash.sh --help`.
 flash:
-	$(FLASH) node_raw $(PORT)
+	$(FLASH) $(BOARD) $(PORT)
 
-## monitor: open the serial monitor on $(PORT)
+## boards: list connected LoRa-Serial boards (name, env, port, chip serial)
+boards:
+	$(FLASH) --list
+
+## monitor: open the serial monitor (PORT=/dev/ttyXXX, or PlatformIO auto-picks)
 monitor:
-	$(PIO) device monitor -p $(PORT) -b 115200
+	$(PIO) device monitor $(if $(strip $(PORT)),-p $(PORT),) -b 115200
 
 ## format-check: fail if any of our (non-vendored) source lines exceed 80 columns
 format-check:

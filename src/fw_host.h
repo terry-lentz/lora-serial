@@ -90,10 +90,22 @@ class Host {
   /**
    * @brief Save the runtime settings (address, mode, freq, sync, ...) to NVS.
    *
-   * Persists addr/peer/feat/name/mode/freq/sync so they survive reboot and
-   * reflash; the live TX power is deliberately NOT persisted.
+   * Persists addr/peer/feat/name/mode/freq/sync/power so they survive reboot
+   * and reflash.
    */
   void SaveSettings();
+
+  /**
+   * @brief Write a short one-way fingerprint of the paired static key.
+   *
+   * The AsconKdf16 of the static key, first 4 bytes as 8 hex chars — the same
+   * on two units iff their keys match, without exposing the key. Backs
+   * `AT+KEY?` and the INFO screen's key line.
+   *
+   * @param[out] out  destination buffer (>= 9 bytes for 8 hex + NUL).
+   * @param[in]  n    capacity of out.
+   */
+  void KeyFingerprint(char* out, size_t n);
 
   /**
    * @brief Whether this board is already PAIRED.
@@ -222,7 +234,12 @@ class Host {
    * @brief Drain the host-output ring to the port without blocking.
    *
    * Writes only as much as availableForWrite() reports room for, so it never
-   * blocks the radio loop on a slow terminal.
+   * blocks the radio loop on a slow terminal. When no terminal has the port
+   * open (DTR deasserted) it DISCARDS the ring instead of holding it: buffered
+   * output is dropped on the next reconnect anyway, and a full ring would
+   * back-pressure PumpLinkOut and wedge the link — which on a display node also
+   * freezes the OLED (its teletype is fed from this ring). The display still
+   * gets every byte via the HtPush tap.
    */
   void HostTxDrain();
 

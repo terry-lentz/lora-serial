@@ -20,6 +20,14 @@ bar:
   and pulled to a header where it can be found and tuned.
 - **No cruft.** Remove dead code, stale comments, and debugging scaffolds once
   they've served their purpose. Names say what they mean.
+- **DRY — Do not Repeat Yourself.** The SECOND time you write the same block
+  (a draw routine, a clamp, a lookup, a format), STOP and factor it into a
+  shared helper, table, or loop. Copy-pasted logic with small tweaks is a defect
+  here, not a shortcut: it drifts, and the reader has to diff N copies to trust
+  any one. Prefer one well-named function called N times over N near-identical
+  blocks; prefer a data table + a loop over a switch that repeats a shape per
+  case. If a change would force you to edit "the same thing" in more than one
+  place, the design is wrong — centralize first, then change once.
 - **Modern, allocation-free C++** (see rule 5) and a clean **OOP** structure:
   the firmware glue is organized as static-singleton classes (see "Architecture
   & C++ structure"). Maintain that shape — keep new behavior in the right class
@@ -214,9 +222,12 @@ method that has repeatedly caught real bugs before they reached hardware.
    bugs — reach for it whenever the native sim can't reach the behavior (nothing
    in `src/`, the radio/PHY glue, is built natively).
 
-   - **Find the boards.** `ls -l /dev/serial/by-id/` — each is
-     `usb-Open_LoRa-Serial_<MAC>-if00 -> ../../ttyACMn`. `ATI` on a port shows
-     its role (`initiator=0|1`), address, peer, and link state.
+   - **Find the boards.** `make boards` (→ `tools/upload_flash.sh --list`)
+     enumerates every connected board — name (`xiao`/`l1`), env, port, and chip
+     serial — from its USB identity (`/dev/serial/by-id/usb-*LoRa-Serial_*`), so
+     use it instead of `ls`-ing by-id by hand. Ports are NOT stable (they swap
+     between boots); identify a board by its name/serial, never by port number.
+     `ATI` on a port shows its role (`initiator=0|1`), address, peer, link state.
    - **Drive each board** over its port with `tools/at.py <port> <cmd>…` (it
      auto-enters AT mode via `+++`). Baseline a pair with
      `tools/at.py <port> ATI "AT+MODE?" "AT+LINK?" AT+DIAG`.
@@ -294,12 +305,18 @@ Current catalog: `upload_flash.sh`, `coredump.sh`, `at.py`, `lora_xfer.py`,
 - **The one exception:** do not reflash when the user has explicitly asked you
   to hold off because *they* are testing on the boards. Honor that until they
   say testing is done.
-- One firmware env (`node_raw`), flashed to BOTH boards — identical image. The
-  half-duplex role + 1-byte address auto-elect from the chip MAC at runtime, so
-  there is no per-board build. Identify which board is which by `ATI`
-  (`initiator=1` is the elected initiator), never by port number.
-- **ALWAYS flash with `make flash PORT=/dev/ttyACMx` (→ `tools/upload_flash.sh`),
-  NEVER `pio run -t upload` or plain `esptool`.** The XIAO's native USB
+- Two MCU families, one protocol: the XIAO ESP32-S3 (`node_raw`) and the Wio
+  Tracker L1 (`wio_l1`) run different builds but the same on-air protocol, and
+  each board auto-elects its half-duplex role + 1-byte address from its chip MAC
+  at runtime — so there's no per-board build and any pair interoperates. A pair
+  of XIAOs is still the common bench (identical image on both). Identify which
+  board is which by `make boards` or `ATI` (`initiator=1` is the elected
+  initiator), never by port number.
+- **ALWAYS flash with `make flash` (→ `tools/upload_flash.sh`), NEVER `pio run
+  -t upload` or plain `esptool`.** `make flash` auto-detects the board and its
+  port from USB identity (narrow it with `BOARD=xiao|l1` and/or `PORT=…` when
+  both are plugged in), and dispatches per MCU — esptool for the XIAO, UF2
+  drag-drop for the L1 (`tools/upload_flash.sh --help`). The XIAO's native USB
   re-enumerates when the firmware reboots into the bootloader, so esptool's
   default DTR/RTS auto-reset fails mid-connect (`No serial data received` /
   `No such device`) — this cost a very long debugging detour once. The tool

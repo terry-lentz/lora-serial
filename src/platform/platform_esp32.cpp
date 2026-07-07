@@ -45,6 +45,10 @@ uint32_t FreeInternalHeapKb() {
   return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
 }
 
+// The XIAO node is USB-powered and has no battery-sense divider — report 0 so
+// callers treat it as "on USB power" (no battery gauge).
+uint16_t BatteryMillivolts() { return 0; }
+
 // Prefer a 2 MB PSRAM ring; fall back to internal RAM. Claimed once at boot.
 uint8_t* AllocIngest(size_t want, size_t fallback, size_t* out_cap) {
   uint8_t* p = (uint8_t*)ps_malloc(want);
