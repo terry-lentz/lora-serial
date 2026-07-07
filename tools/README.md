@@ -7,8 +7,10 @@ capability one of these almost has, add it here rather than starting fresh.
 
 | Tool | Purpose |
 |------|---------|
-| `upload_flash.sh <env> <port>` | Flash a build over native USB without the BOOT button (1200-baud touch → esptool). |
+| `upload_flash.sh <env> <port>` | Flash an ESP32 build over native USB without the BOOT button (1200-baud touch → esptool). |
+| `make_uf2.sh <env> [out.uf2]` | Wrap a built nRF52 `firmware.hex` into a flashable `.uf2` (Adafruit UF2 bootloader, e.g. `wio_l1`); resolves `uf2conv.py` from the installed framework. |
 | `coredump.sh <env> <port>` | Pull and decode a crash core dump from a board (needs the matching firmware.elf). |
+| `install_nrf52_ldscript.py` | PlatformIO **pre-build hook** (not run by hand): installs the S140 v7 linker script into the nRF52 framework so `wio_l1` links at the right SoftDevice offset. |
 | `at.py <port> <cmd> ...` | Run AT commands (auto `+++` escape) and print the replies. `--until SUBSTR [--timeout SEC]` waits for a delayed result (e.g. a slow-mode `AT+SPEEDTEST`). |
 | `lora_xfer.py <tx> <rx> <n>` | Throughput + byte-exactness test over the serial cable; can pin a mode first. |
 | `loraserial.py` | Shared Python lib (`Board` class) the two `.py` tools build on. |

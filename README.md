@@ -1,21 +1,58 @@
 # LoRa Serial Link — a reliable point-to-point "wireless serial cable"
 
-<img src="docs/img/hero.jpg" width="480" alt="Two XIAO ESP32S3 + Wio-SX1262 boards wired to a NanoPi NEO, with a phone logged in over the LoRa link">
+**Turn two LoRa boards into a wireless serial cable.** Plug a terminal or serial
+device into either end; whatever you send comes out the other side, byte-exact,
+kilometers away. It's a transparent serial port that happens to be a long-range
+radio — **fully custom firmware with its own link layer and on-air protocol,
+built from the ground up**: not Meshtastic, not LoRaWAN, with
+[RadioLib](https://github.com/jgromes/RadioLib) the only radio dependency. It currently supports two boards: a headless **XIAO ESP32-S3** node
+and a **Wio Tracker L1** that can show the stream on its OLED (see
+[Supported boards](#supported-boards)).
 
-*The whole thing in the wild: the two LoRa boards (left) bridging a NanoPi NEO's
-serial console to a phone (right) logged in over the air — a plain terminal app,
-no custom software.*
+> **Built with Claude (AI-assisted development).** This wasn't one-shot "vibe
+> coding" — it took several iterations over days, with a lot of direction:
+> architecture, design decisions, coding standards, testing and diagnostic
+> approaches, and the UI, closely guided by me at each step (the working rules
+> are in [CLAUDE.md](./CLAUDE.md)). In practice it was roughly a **10× throughput
+> gain** — work that would have taken 2–3 days took 2–3 hours. Truly remarkable
+> what can be done. Is it 'perfection'? No — but the tradeoff, I believe, is
+> worth it.
 
-<img src="docs/img/demo.gif" width="800" alt="A LoRa Serial Link session: driving the LoRa link from a terminal — AT command interface, live RSSI/SNR, and a logged-in console over the air">
+<table align="center">
+<tr>
+<td align="center" width="430"><img src="docs/img/hero.jpg" width="410" alt="Two XIAO ESP32-S3 + Wio-SX1262 boards bridging a NanoPi NEO console to a phone logged in over LoRa"></td>
+<td align="center" width="430"><img src="docs/img/l1_device.jpg" width="350" alt="The Wio Tracker L1 display node in a 3D-printed case, its OLED showing text received over LoRa"></td>
+</tr>
+<tr valign="top">
+<td align="center" width="430"><b>XIAO ESP32-S3 node</b><br/><sub>The headless serial cable — here bridging a NanoPi's console to a phone logged in over the air.</sub></td>
+<td align="center" width="430"><b>Wio Tracker L1 display node</b><br/><sub>Same firmware plus an OLED — it shows the received stream on its screen.</sub></td>
+</tr>
+</table>
 
-*A live session between two radios (sped up): configuring the radios and logging in over the LoRa link from an ordinary terminal.*
+<table align="center">
+<tr>
+<td align="center"><img src="docs/img/l1_markets.jpg" width="250" alt="Wio Tracker L1 MAIN screen: a live MARKETS stock ticker received over LoRa"></td>
+<td align="center"><img src="docs/img/l1_info.jpg" width="250" alt="Wio Tracker L1 INFO screen: frequency, mode, signal, link, uptime"></td>
+<td align="center"><img src="docs/img/l1_config.jpg" width="250" alt="Wio Tracker L1 CONFIG menu: brightness, region, frequency, mode, encryption, compression"></td>
+</tr>
+<tr><td colspan="3" align="center"><sub><i>The <a href="#supported-boards">L1</a>'s three screens — a live feed (here, real stock-ticker data streamed over the link), diagnostics, and the on-device settings menu.</i></sub></td></tr>
+</table>
 
-Turn two LoRa boards into a **wireless serial cable.** Plug a terminal or serial
-device into either end; **whatever you send comes out the other side, byte-exact,
-kilometers away — with no special software on either host.** It's a transparent
-serial port that happens to be a long-range radio.
+<table align="center">
+<tr><td align="center"><img src="docs/img/demo.gif" width="800" alt="A LoRa Serial Link session: driving the LoRa link from a terminal — AT command interface, live RSSI/SNR, and a logged-in console over the air"></td></tr>
+<tr><td align="center"><sub><i>A live session (sped up): configuring the radios and logging in over the LoRa link from an ordinary terminal.</i></sub></td></tr>
+</table>
 
-## Get it — flash a prebuilt release (no build needed)
+## Contents
+
+- [Quick start: flash a release](#quick-start-flash-a-prebuilt-release)
+- [What you get](#what-you-get) · [Supported boards](#supported-boards)
+- [Background](#background) · [Docs index](#docs)
+- [Build from source](#build-from-source) · [Architecture](#architecture-a-smart-radio-modem)
+- [Login terminal](#use-it-as-a-login-terminal--no-custom-software) · [AT / config](#configure-over-at-commands)
+- [Regulatory](#regulatory) · [Roadmap](#roadmap)
+
+## Quick start: flash a prebuilt release
 
 [![Latest release](https://img.shields.io/github/v/release/terry-lentz/lora-serial?sort=semver&label=latest)](https://github.com/terry-lentz/lora-serial/releases/latest)
 
@@ -66,92 +103,39 @@ See **[Build from source](#build-from-source)** below.
 
 Not a toy demo — a full transparent serial transport with its own
 Selective-Repeat link layer, a runtime-tunable radio, real authenticated
-encryption, and on-device diagnostics. The headlines, and the depth under each:
+encryption, and on-device diagnostics:
 
-- 🔌 **Plug-and-play transparent serial** — each end is a plain USB serial port;
-  whatever you write comes out the other side byte-exact, with no host software.
-  - Works with `tio`, PuTTY, `screen`, a phone serial app, or point `agetty` at
-    it for a **remote login shell over LoRa**. Hardware-verified with PuTTY
-    (Windows), Termius (Android and Linux), and the Android *Serial USB Terminal*
-    app. Known exception: **Termius on Windows** reads nothing (it continuously
-    toggles the DTR line instead of holding it, so the device — correctly — never
-    starts sending; a client-side quirk still under investigation). Use PuTTY on
-    Windows.
-  - Presents a friendly USB identity (**`LoRa-Serial-XXXX`**, suffix from the
-    chip MAC) so two boards plugged into one host are easy to tell apart.
-- 🆔 **Zero-effort setup — no addresses, no pairing required** — flash the
-  *same* firmware to both boards and power them on; there's nothing to number or
-  configure to get a working link.
-  - They **auto-discover each other and elect their roles + addresses from their
-    chip MACs** at boot (lower MAC becomes the initiator) — identical firmware,
-    no per-board build, no manual addressing.
-  - Encryption works immediately on a built-in key; the optional one-time
-    `AT+TRAIN` upgrade to a unique per-pair key is the only setup step, and even
-    that is interactive, not required.
-  - **First-boot proximity pairing:** a fresh board (empty NVS) pairs *once* at
-    low power with an adjacent board — auto-discovering, electing roles, deriving
-    a **unique per-pair key**, and persisting it — then runs at full power and
-    skips discovery on every later boot. See "Pairing & keys" below.
-- ✅ **Reliable & byte-exact** — a custom Selective-Repeat ARQ link layer, not
-  fire-and-forget packets.
-  - **SACK** (selective acknowledgement) retransmits only the frames actually
-    lost; verified byte-exact through 30% packet loss and multi-MB transfers.
-  - A **BDP-sized sliding window** that auto-sizes to the current mode's speed,
-    plus automatic fragmentation/reassembly.
-  - Optional **on-the-wire compression** (`AT+COMP`, heatshrink LZSS) — large
-    wins on text/logs (see the throughput table below).
-  - Half-duplex turn-taking driven by a **formally model-checked**
-    mode-switch / recovery state machine
-    ([MODE_SWITCH_SPEC](./docs/MODE_SWITCH_SPEC.md)).
-- 🔒 **Encrypted & authenticated by default** — Ascon-128 AEAD (a NIST
-  lightweight-crypto standard) with replay protection, on out of the box.
-  - **Encrypted with zero setup** using a built-in fallback key; run
-    **`AT+TRAIN`** once on both ends for a **unique per-pair key** derived over
-    the air via X25519 ECDH (the secret is never transmitted), stored in NVS so
-    it survives reflashes.
-  - Optional per-session **forward secrecy** (`AT+FS=1`, experimental).
-  - **`AT&F`** factory-resets the device and wipes the paired key (back to the
-    fallback) — that's your hard-reset / re-pair. Full write-up in
-    [SECURITY.md](./docs/SECURITY.md).
-- ⚡ **Speed vs. range on the fly** — retune the radio at runtime, no reflash.
-  - Six modes from **turbo** (SF5) to **far** (SF12), plus an experimental
-    **ludicrous** GFSK mode; `AT+MODE=<name>` switches both ends together.
-  - **`AT+MODE=auto` is ADR** (adaptive data rate) — a loss-aware engine that
-    picks the fastest mode the link's SNR *and* retransmit rate will carry, and
-    steps down for range on its own. **Opt-in and experimental:** on a marginal
-    link it can wedge in the slowest mode, so it's off by default pending more
-    field validation.
-  - **Auto-power** (`AT+APWR=1`) trims each side's TX power to what the peer's
-    signal report says the link needs. Also **opt-in and experimental** — a
-    mode switch can leave the faster mode below its demod floor — so out of the
-    box a board runs **compression + encryption at a fixed `medium` mode and
-    full power**, and you can enable the two adaptive features to experiment.
-    The GFSK **`ludicrous`** rung is opt-in too (`AT+ADRGFSK=1`): the fastest
-    rung, but short-range and pending field-range validation.
-  - Tune frequency (`AT+FREQ`), sync word (`AT+SYNC`), TX power (`AT+PWR`), and
-    inter-frame gap (`AT+TXGAP`) live — set the carrier for your region
-    (see the **Regulatory** section below).
-- 🩺 **Diagnostics & self-healing built in** — it tells you what it's doing and
-  why it last broke.
-  - Live link stats (`AT+LINK?`: RSSI/SNR, retransmits, per-mode counters) and
-    session/crypto status (`AT+SESSION?`).
-  - Crash forensics (`AT+DIAG`: last-reset reason, free/min RAM, coredump flag)
-    with on-device core dumps you can decode to a backtrace, plus deliberate
-    crash/hang injection (`AT+CRASH`) to exercise the tooling.
-  - A built-in throughput tester (`AT+SPEEDTEST` / `AT+SINK`).
-  - Recovers itself: a software loop watchdog, a radio-stuck watchdog, and an
-    auto-recovery state machine (re-init → rendezvous → reboot) with timeouts
-    scaled to the current mode's time-on-air.
-  - **Host-side tools** ([`tools/`](./tools/README.md)) that drive all of the
-    above: `at.py` (run AT commands / speed tests), `lora_xfer.py` (throughput +
-    byte-exactness over the cable), `coredump.sh` (pull & decode a crash), and
-    `upload_flash.sh` (flash over the XIAO's native USB).
-- 🧩 **Cheap, generic hardware + a real test bench** — runs on any LoRa radio
-  [RadioLib](https://github.com/jgromes/RadioLib) supports (developed on XIAO
-  ESP32S3 + Wio-SX1262). A native simulation (`pio test -e native`) models real
-  hardware behaviors — mode-deaf delivery, SNR-driven loss, time-on-air,
-  backpressure, a radio going deaf — so changes are proven before they ever
-  reach a board.
+- 🔌 **Plug-and-play transparent serial.** Each end is a plain USB serial port —
+  bytes in one come out the other byte-exact, with no host software. Works with
+  `tio`, PuTTY, `screen`, phone serial apps, or `agetty` for a login shell over
+  LoRa (verified with PuTTY, Termius on Android/Linux; use PuTTY on Windows).
+- 🆔 **Zero-effort setup.** Flash the *same* image to both boards and power on:
+  they auto-elect roles + addresses from their chip MACs and proximity-pair once
+  at low power on first boot — no numbering, no config, and encrypted immediately.
+- ✅ **Reliable & byte-exact.** A custom Selective-Repeat ARQ link layer — SACK,
+  a BDP-sized auto-sizing window, fragmentation, optional compression (`AT+COMP`)
+  — verified byte-exact through 30% loss and multi-MB transfers, over a
+  **formally model-checked** turn/recovery state machine
+  ([DESIGN.md](./docs/DESIGN.md), [MODE_SWITCH_SPEC](./docs/MODE_SWITCH_SPEC.md)).
+- 🔒 **Encrypted by default.** Ascon-128 AEAD (a NIST lightweight-crypto standard)
+  with replay protection, on out of the box; **`AT+TRAIN`** derives a unique
+  per-pair key over the air via X25519 (the secret never transmitted, kept in
+  NVS), with optional forward secrecy ([SECURITY.md](./docs/SECURITY.md)).
+- ⚡ **Speed vs. range on the fly.** Six modes from **turbo** (SF5) to **far**
+  (SF12) plus an experimental **ludicrous** GFSK mode — `AT+MODE=<name>` retunes
+  both ends live, no reflash; frequency, sync word, and TX power tune live too.
+  Adaptive data rate (`AT+MODE=auto`) and auto-power are opt-in and experimental
+  (see the note above).
+- 🩺 **Diagnostics & self-healing.** Live link/session stats (`AT+LINK?`,
+  `AT+SESSION?`), crash forensics with decodable core dumps (`AT+DIAG`, and
+  `AT+CRASH` to exercise them), a built-in throughput tester, and watchdogs + an
+  auto-recovery state machine. Host-side [`tools/`](./tools/README.md) drive it
+  all.
+- 🧩 **Cheap, generic hardware + a real test bench.** Runs on any LoRa radio
+  [RadioLib](https://github.com/jgromes/RadioLib) supports. A native simulation
+  (`pio test -e native`) models real hardware quirks — mode-deaf delivery,
+  SNR-driven loss, backpressure, a radio going deaf — so changes are proven
+  before they reach a board.
 
 **Speeds at a glance** (measured, byte-exact, encrypted; compressed = best case
 on text/logs, uncompressed = worst case on random binary):
@@ -190,76 +174,84 @@ Full comparison — the trade-offs, licensing, honorable mentions (CC1200, BLE
 Coded PHY), and the low-power future — is in
 [docs/HW_ALTERNATIVES.md](./docs/HW_ALTERNATIVES.md).
 
-## Background Story
+## Supported boards
 
-This project started as a fun experiment to see if I could get two SX1262
-LoRa boards to talk to each other using custom firmware. I had played with
-[Meshtastic](https://meshtastic.org/) quite a bit but in my area (Taiwan) there
-wasn't much traffic and it was not too interesting (see
-[SW_ALTERNATIVES.md](./docs/SW_ALTERNATIVES.md) for how this project compares).
-The 'more interesting' application (to me) was to remotely connect
-to a machine (tty) long distances to remotely administer or run applications at
-modem speeds. I even thought about running a BBS on it for giggles.
+The link runs on **any LoRa radio [RadioLib](https://github.com/jgromes/RadioLib)
+supports**. Two boards are first-class, built from the *same* `src/` firmware
+behind a small platform layer (`src/platform/`), so both ends always speak an
+identical protocol:
 
-In this project, I wanted  to do some 'vibe coding' with Claude and gave it a lot
-of guidance along the way. Fairly quickly (in a couple hours) I had the basic 'toy'
-functionality working. I could easily use Termius on my phone connected to the
-hardware over serial to remotely access a machine. It was slow and not too
-reliable. The connection quickly would hang. Any changes required a reflash.
+- **XIAO ESP32-S3 + Wio-SX1262** — the primary node, and what most of this README
+  describes. A headless USB serial port; flash the `node_raw` image to both ends.
+- **Seeed Wio Tracker L1** (nRF52840 + SX1262 + 1.3″ OLED) — a **receive-and-
+  display node**: besides being a serial port it renders the received stream on
+  its screen and adds an on-device menu. Flash the `wio_l1` image. Full
+  build/flash/port details: **[docs/WIO_TRACKER_L1.md](./docs/WIO_TRACKER_L1.md)**.
 
-Initially there was no concept of 'modes' to be able to configure spreading factor,
-bandwidth, and signal strength on the fly. I made these configurable and since I
-had two devices near each other connected to the same machine, I could let Claude
-continuously iterate at improving the performance while I sat back and watched.
+<table align="center">
+<tr><td align="center"><img src="docs/img/xiao_window.jpg" width="440" alt="A XIAO ESP32-S3 node in a 3D-printed case with a whip antenna, mounted on a window overlooking Taipei"></td></tr>
+<tr><td align="center"><sub><i>A XIAO node deployed in the wild — 3D-printed case and whip antenna, on a window in Taipei.</i></sub></td></tr>
+</table>
 
-Eventually I thought it would be a good idea to make these configurable with AT
-commands like a real modem. And so the AT commands were born allowing the changing
-of mode on the fly and various other settings that I thought would also be useful
-to configure (the full AT command set is documented in the AT-mode section below).
+### Wio Tracker L1 — the display node
 
-Ultimately, I then thought it would be nice if we could use the SNR
-(signal-to-noise-ratio) data to figure out how to dynamically adjust the SF/BW and
-signal strength. With Claude's help we did a bunch of research (see
-[RESEARCH.md](./docs/RESEARCH.md)) to discover best approaches, landing on the
-[ADR (adaptive data rate)](./docs/FUTURE_MODES.md) approach you currently see
-implemented as `AT+MODE=auto`. That research also led to building a custom link
-layer (see the "Our own link layer" section below, and
-[DESIGN.md](./docs/DESIGN.md) for the full transport spec).
+The L1's OLED has three screens; the **user button** cycles between them and the
+**trackball** navigates. A top status bar is on every screen:
 
-I also wanted encryption and specifically the ability to prevent replay attacks.
-Initially it started out with just a static shared key baked into the firmware but
-later on we added support for a 'training' mode (`AT+TRAIN`) where the devices
-automatically can on their own agree upon a shared key over the air — using an
-X25519 key exchange, so the secret itself is never transmitted. This is persisted
-across firmware reflashes by being stored in NVS (non-volatile storage). The
-crypto design is written up in [SECURITY.md](./docs/SECURITY.md).
+<img src="docs/img/l1_statusbar.svg" width="640" alt="Wio Tracker L1 status bar: frequency, encryption padlock, speed/mode, signal strength, TX/RX activity, and a heartbeat that pulses on each received frame">
 
-Another important part was to be able to run simulation locally to test code changes
-without needing to redeploy firmware every time. There are a fair number of tests
-that are available to be run with the PlatformIO development environment (`pio test
--e native`). Some of these tests came from real bugs that were encountered along the
-way. How the simulation and tests work is documented in
-[TESTING.md](./docs/TESTING.md).
+Left to right: the carrier **frequency**, an **encryption** padlock (crossed out
+when off), the **speed/mode**, a **signal**-strength meter, **TX/RX** activity
+arrows, and a **heartbeat** that pulses on each frame received — so if it stops
+and the bars fall to zero, the link has gone quiet.
 
-A few times I hit problems with the board crashing but no real way to debug the
-issues easily. So I instructed Claude to help me build out some crash-dump analysis,
-metrics, and diagnostic tools — written up in
-[DIAGNOSTICS.md](./docs/DIAGNOSTICS.md) (what each tool/field is) and
-[DEBUGGING.md](./docs/DEBUGGING.md) (a step-by-step worked walkthrough). I thought it
-would be good to have an ability to purposefully crash or hang the device (the
-`AT+CRASH` command) in order to test those diagnostic tools, so this was also added.
+- **MAIN** — a live teletype of the received bytes over a 64-line scrollback.
+  Roll the trackball up/down to scroll (hold to auto-scroll); a scrollbar shows
+  the position, and the view follows new data while it's at the bottom. Renders
+  the full CP437 glyph set (box-drawing, arrows, `▲`/`▼`, …).
+- **INFO** — read-only diagnostics: frequency, mode, signal (RSSI/SNR), TX/reTX
+  counts, link state, uptime.
+- **CONFIG** — an on-device settings menu: brightness, region (TW/US/EU),
+  frequency, mode, encryption, compression. Up/down selects a row; **press** to
+  edit, **left/right** change the value, **press** again to save (persisted to
+  flash); the button cancels. Changes apply just like the matching AT command.
 
-Overall, this is just a fun personal project to see how far I could get these devices
-to work from and connect to a terminal session. It really does work. I also wanted to
-see how far I could push Claude to build something that works and learn more about
-LoRa along the way. I am not a radio expert and know just enough to be
-'dangerous.' I learned a lot and decided to make this available to the public for
-anyone that finds it interesting or useful. If you are interested in how I got Claude
-to write code the way it did, take a look at the [CLAUDE.md](./CLAUDE.md) file. This
-is a fairly lightweight set of rules compared to other projects I've built internally
-(not yet made public) but maybe it is useful. An important 'tip' is to let Claude
-help you build up this file (and it can also reference other files if you want to split
-it up).
+The L1 uses the same production defaults as the XIAO (encryption + compression,
+role auto-election, first-boot proximity pairing).
+
+## Background
+
+This started as a fun experiment: could I get two SX1262 LoRa boards talking over
+custom firmware? I'd played plenty with [Meshtastic](https://meshtastic.org/), but
+in my area (Taiwan) there wasn't much traffic to make it interesting (see
+[SW_ALTERNATIVES.md](./docs/SW_ALTERNATIVES.md) for how this compares). What I
+actually wanted was a **remote serial line** — logging into a distant machine at
+modem speeds, maybe even running a BBS for giggles.
+
+The basic toy came together in a couple of hours: I could log in from Termius on my
+phone over the air. But it was slow, it hung constantly, and every change meant a
+reflash. Turning that toy into something solid was the real project:
+
+- **Tunable on the fly.** Spreading factor / bandwidth / power became runtime
+  settings, then modem-style **AT commands** — and with two boards side by side on
+  one machine, Claude could iterate on performance while I watched.
+- **Adaptive & reliable.** SNR-driven [research](./docs/RESEARCH.md) led to
+  [ADR](./docs/FUTURE_MODES.md) (`AT+MODE=auto`) and a **custom link layer**
+  ([DESIGN.md](./docs/DESIGN.md)), so transfers are byte-exact — not
+  fire-and-forget packets.
+- **Encrypted.** From a baked-in key to **`AT+TRAIN`**, where the boards agree a
+  per-pair key over the air via X25519 (the secret is never transmitted) and keep
+  it across reflashes ([SECURITY.md](./docs/SECURITY.md)).
+- **Testable & debuggable.** A native [simulation](./docs/TESTING.md) (`pio test -e
+  native`) catches regressions with no hardware — several tests came straight from
+  real bugs — and when boards crashed with no way to see why, we built
+  [crash-dump + diagnostic tooling](./docs/DIAGNOSTICS.md) (with `AT+CRASH` to
+  exercise it).
+
+I'm not a radio expert — just enough to be dangerous — but it really works, I
+learned a lot, and it seemed worth sharing. If you're curious how the code came out
+the way it did, the guidance lives in [CLAUDE.md](./CLAUDE.md); a good tip is to let
+Claude help you grow that file as you go.
 
 ## Docs
 
@@ -324,31 +316,25 @@ tio /dev/ttyACM0                        # client end (roaming) -> login prompt
 ```
 
 That's the whole path. Optional next steps: pick a speed/range preset with
-`AT+MODE=<name>` (or `AT+MODE=auto` to let the link adapt), set up a **permanent
-respawning console** with the systemd unit in [`deploy/`](./deploy/README.md), and
-read the regulatory/**[Before transmitting](#️-before-transmitting)** notes before
-going on-air. Full detail for every step is in
-[Build & flash](#build--flash), [Use it as a login terminal](#use-it-as-a-login-terminal-no-custom-software),
-and [Configure / query the link](#configure--query-the-link-from-a-plain-terminal--at-mode).
+`AT+MODE=<name>` (or `AT+MODE=auto` to let the link adapt), run a getty for a
+**respawning login console** (see below), and read the regulatory /
+**[Before transmitting](#️-before-transmitting)** notes before going on-air. Full
+detail for every step is in
+[Build & flash](#build--flash), [Use it as a login terminal](#use-it-as-a-login-terminal--no-custom-software),
+and [Configure over AT commands](#configure-over-at-commands).
 
 ## Built with — and why these choices
 
-- **[RadioLib](https://github.com/jgromes/RadioLib) drives the radio.** It speaks a
-  *single* API across nearly every LoRa chip (SX126x / SX127x / SX128x, LR11xx,
-  STM32WL, RFM9x…), so our transport stays **radio-agnostic and portable** — this is
-  what lets the project run on cheap, varied hardware instead of one board. We chose it
-  over the **chip-specific Semtech driver** (lots of boilerplate, single part), the
-  **Arduino-LoRa** library (SX127x-only, lightly maintained), and **RadioHead** (broad
-  but dated): RadioLib is actively maintained, gives **raw-PHY access** (not
-  LoRaWAN-locked), and exposes `getTimeOnAir()` — which we use to **auto-tune the turn
-  timing for every mode**.
-- **[PlatformIO](https://platformio.org/) builds and tests it.** One `platformio.ini`
-  **pins exact platform/library versions** (reproducible builds), defines every
-  firmware variant, *and* a **native test environment** — so the portable link layer is
-  unit-tested on your PC (`pio test -e native`) with no hardware. We chose it over the
-  **Arduino IDE** (no reproducible deps, no native tests, no CI) and **raw
-  ESP-IDF/CMake** (far more boilerplate) — while still getting the Arduino core's
-  USB-CDC and RadioLib convenience underneath.
+- **[RadioLib](https://github.com/jgromes/RadioLib) drives the radio** — one API
+  across nearly every LoRa chip (SX126x/127x/128x, LR11xx, STM32WL, RFM9x…), so the
+  transport stays radio-agnostic and portable. Chosen over the chip-specific Semtech
+  driver, Arduino-LoRa, and RadioHead for its raw-PHY access (not LoRaWAN-locked) and
+  `getTimeOnAir()`, which we use to auto-tune the turn timing for every mode.
+- **[PlatformIO](https://platformio.org/) builds and tests it** — one
+  `platformio.ini` pins exact platform/library versions (reproducible builds),
+  defines every firmware env, *and* a **native test environment** so the portable
+  link layer is unit-tested on your PC with no hardware. Chosen over the Arduino IDE
+  (no reproducible deps or native tests) and raw ESP-IDF/CMake (far more boilerplate).
 
 ## What this is (and how it differs from Reticulum / Meshtastic)
 
@@ -373,21 +359,23 @@ to the LoRa PHY ceiling for the 2-node case and stay far simpler.
 
 ## Architecture: a smart radio modem
 
-Both ends are **identical** — **XIAO ESP32S3 + Wio-SX1262 (B2B)** on USB-C, running
-the same firmware (role decided at runtime from the address, so the boards are
-interchangeable). Each presents a plain serial port; whatever you plug in is the app.
+Both ends run the **same firmware** — on a **XIAO ESP32-S3 + Wio-SX1262** or a
+**Wio Tracker L1** (the shared `src/` builds for both MCU families behind a small
+platform layer). The role is decided at runtime from the address, so the ends are
+interchangeable; each presents a plain serial port, and whatever you plug in is
+the app.
 
 ```
   any serial program            any serial program
   (terminal, getty, scp,        (terminal, getty,
    a device's console, …)        a device's console, …)
        │ USB-CDC (plain serial)        │ USB-CDC (plain serial)
-  [XIAO ESP32 + SX1262] ~~~~ LoRa ~~~~ [XIAO ESP32 + SX1262]
+  [XIAO / Wio-L1 + SX1262] ~~ LoRa ~~ [XIAO / Wio-L1 + SX1262]
    firmware = the smart modem:  RadioLib PHY + Selective-Repeat ARQ +
    flow control + auto TX power + per-mode timing  (all on-device)
 ```
 
-The **entire reliable link lives on the ESP32** (PHY, framing+CRC, Selective-Repeat
+The **entire reliable link lives on the MCU** (PHY, framing+CRC, Selective-Repeat
 ARQ, half-duplex turn-taking, flow control, optional auto power) — the radio timing is too
 tight to push across USB latency, and keeping it on-device is what makes each end a
 **plain reliable serial port with no host software**. The host just reads/writes
@@ -400,14 +388,16 @@ firmware**; the role (initiator / responder of the half-duplex turn-taking) is
 auto-elected at boot from each chip's MAC (lower MAC initiates), so the two boards
 are interchangeable and need no per-board configuration.
 
-- **Framework:** ESP32 Arduino core, built with the PlatformIO `espressif32` platform
+- **Framework:** ESP32 Arduino core (XIAO) / Adafruit nRF52 core (Wio Tracker L1),
+  via PlatformIO — the shared `src/` builds for both behind `src/platform/`
 - **Radio driver:** [RadioLib](https://github.com/jgromes/RadioLib) 7.7.1 (SX1262)
 - **Sources:** [`src/`](./src/) — `fw_config.h` (shared config/types), `fw_radio.{h,cpp}`
   (RadioLib glue, ISR, modes, TX/RX), `fw_host.{h,cpp}` (USB I/O, PSRAM ingest, AT mode,
   pairing, NVS), `fw_diag.{h,cpp}` (crash/health diagnostics), `fw_session.{h,cpp}`
   (forward-secrecy handshake), `fw_device.{h,cpp}` (the `Device` orchestrator: turn
   engine, role discovery, recovery, ADR), `main.cpp` (shared globals + `setup()`/`loop()`
-  forwarding to `g_device`) — and
+  forwarding to `g_device`), [`src/platform/`](./src/platform/) (the ESP32/nRF52
+  abstraction) and `fw_display.cpp` (the L1 OLED front-end) — and
   [`lib/linklayer/`](./lib/linklayer/) (the portable, unit-tested data-link layer below)
 
 ### Roles: initiator & responder
@@ -501,7 +491,8 @@ Semtech IP — there is no third-party clone. We **drive the radio entirely thro
 and app layers are **radio-agnostic**. So supporting another chip is mostly a
 radio-init swap, not a rewrite.
 
-- **Tested:** **SX1262** (Semtech SX126x family) on the Seeed Wio-SX1262 + XIAO ESP32S3.
+- **Tested:** **SX1262** (Semtech SX126x family) on the Seeed Wio-SX1262 — on two
+  MCU families: the **XIAO ESP32-S3** and the **Wio Tracker L1** (nRF52840).
 - **Should work via RadioLib (untested here)** — the other Semtech LoRa families RadioLib supports:
   - **SX126x** — SX1261 / **SX1262** / SX1268 (our family; sub-GHz).
   - **SX127x** — SX1272 / SX1276 / SX1278 / SX1279 (older; the common **RFM95/96** modules).
@@ -538,7 +529,7 @@ getty handles the login; our device handles the reliable byte pipe. The same
 applies to anything that speaks a serial port (PPP/SLIP for IP-over-LoRa, a
 device's serial console, etc.) — no host software required.
 
-## Configure / query the link from a plain terminal (`+++` / AT mode)
+## Configure over AT commands
 
 Like a Hayes dial-up modem, the transparent serial build (`*_raw`) understands an
 **out-of-band command mode** — so you can change radio settings or check the link
@@ -685,7 +676,25 @@ on SACK** removed the per-loss stall; that journey is written up in
 [FUTURE_MODES.md](./docs/FUTURE_MODES.md). Opt-in, very short range (no spreading
 gain); set it manually on **both** ends (`AT+MODE=ludicrous`).
 
-## Regulatory — pick a frequency that's legal where you are
+### Field notes — real-world, anecdotal
+
+The ranges above are line-of-sight estimates; here's what actually held up in the
+field. These are casual walk-around tests in **congested downtown Taipei** — dense
+high-rise, heavy RF, mostly **non-line-of-sight** — with no field-strength gear,
+just carrying the boards around. Treat them as "it works," not lab data:
+
+- On **slow mode** (SF9) the link held at **~1 km** through the city with no line
+  of sight — including a walk to the **far side of my own building** (~1 km off),
+  where the signal had to punch through the whole building and *still* came
+  through usable.
+- **Medium mode** (SF7) couldn't hold that same ~1 km in the city — the missing
+  line of sight, not the raw distance, is what hurt. In dense non-line-of-sight,
+  drop to **slow** (or **far**) and trade speed for the margin that gets through.
+
+Which matches the ladder above: obstacles and NLOS cost far more than distance,
+and the slower, higher-SF modes buy the link margin to punch through them.
+
+## Regulatory
 
 The SX1262 can tune roughly **150–960 MHz**, so the *band is a configuration
 choice* — and which sub-GHz ISM band is legal is **your responsibility**, set by
@@ -763,38 +772,18 @@ Picking a legal *frequency* is only half of it: regulators also cap the
 - SX1262 **DIO3 → TCXO @ 1.8 V** → pass `tcxoVoltage = 1.8` to `begin()`.
   The TCXO is required for the narrow BW125 / SF12 link.
 
+For the **Wio Tracker L1**'s pin map, SoftDevice offset, and OLED wiring, see
+[docs/WIO_TRACKER_L1.md](./docs/WIO_TRACKER_L1.md).
+
 ## Build & flash
 
-Built with [PlatformIO](https://platformio.org/). The **transparent serial
-transport** is the single `node_raw` env. **Flash the same image to both
-boards** — the firmware is identical on each; they auto-elect the half-duplex
-role from their MACs at boot, so there's nothing per-board to build or set.
-
-There's a standard **Makefile** wrapping the PlatformIO commands:
-
-```bash
-# Install PlatformIO if needed:  pipx install platformio   (or: pip install platformio)
-
-make test                     # run the unit/sim test suite (no hardware needed)
-make build                    # compile the firmware image
-make flash PORT=/dev/ttyACM0  # flash a board (repeat for each board's port)
-make flash PORT=/dev/ttyACM1  # the other board — same image
-make help                     # list all targets
-```
-
-Or call PlatformIO directly:
-
-```bash
-pio test -e native          # run the unit/sim test suite (no hardware needed)
-
-# Flash each board. Use the helper, NOT `pio ... -t upload` — see below for why.
-./tools/upload_flash.sh node_raw /dev/ttyACM0
-./tools/upload_flash.sh node_raw /dev/ttyACM1   # same image, other board
-```
-
-Prefer not to build? Grab **prebuilt firmware from the GitHub Releases page** and
-flash the `*.factory.bin` at offset `0x0` (web flasher or esptool — see the release
-notes).
+The build/flash commands are in [Build from source](#build-from-source) above
+(`make build` / `make flash PORT=…`, or `pio` directly). The XIAO transport is the
+`node_raw` env; the **Wio Tracker L1** display node is the `wio_l1` env, flashed
+via its UF2 bootloader (see [docs/WIO_TRACKER_L1.md](./docs/WIO_TRACKER_L1.md)).
+Prefer not to build? Grab a prebuilt image from the
+[Releases](https://github.com/terry-lentz/lora-serial/releases/latest) page. The
+rest of this section is *why* the XIAO needs its own flasher.
 
 ### Flashing over native USB (`tools/upload_flash.sh`)
 

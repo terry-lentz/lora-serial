@@ -113,6 +113,14 @@ class Radio {
   int ModeIndexByName(const char* name);
 
   /**
+   * @brief Name of a preset by its table index (for menus that list modes).
+   *
+   * @param[in] idx  table index (0-based).
+   * @return the preset name, or "?" if the index is out of range.
+   */
+  const char* ModeNameByIndex(int idx);
+
+  /**
    * @brief Index of the live SF/BW/CR (or GFSK) in the radio mode table.
    *
    * @return the matching table index, or -1 if the live config is custom.

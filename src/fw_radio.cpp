@@ -285,6 +285,10 @@ int Radio::RfModeCount() {
     return (int)(sizeof(kRfModes) / sizeof(kRfModes[0]));
 }
 
+const char* Radio::ModeNameByIndex(int idx) {
+    return (idx >= 0 && idx < RfModeCount()) ? kRfModes[idx].name : "?";
+}
+
 int Radio::ModeIndexByName(const char* name) {
     for (int i = 0; i < RfModeCount(); i++)
         if (!strcasecmp(name, kRfModes[i].name)) return i;

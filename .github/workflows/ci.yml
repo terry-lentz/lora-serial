@@ -32,5 +32,10 @@ jobs:
       - name: Native unit tests (link layer + modem sim)
         run: pio test -e native
 
-      - name: Build firmware image
+      - name: Build firmware image (XIAO)
         run: pio run -e node_raw
+
+      - name: Build Wio Tracker L1 (nRF52) + UF2
+        run: |
+          pio run -e wio_l1
+          tools/make_uf2.sh wio_l1

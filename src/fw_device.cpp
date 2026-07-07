@@ -310,6 +310,13 @@ void Device::Setup() {
     BG("[BG] S4 pre RadioStartTask\r\n");
     g_radio.StartTask();   // start the interrupt RX task + arm continuous RX
                         // (no-op otherwise). After all radio config above.
+#ifdef HAS_DISPLAY
+    // Bring the OLED up BEFORE role election / proximity pairing below — those
+    // can BLOCK waiting for a peer, so a display node must already be drawing
+    // (status bar + pairing banners via the host-out tap) rather than sitting
+    // blank until it links. The radio is fully configured by this point.
+    g_display.Init();
+#endif
 #if MAC_ROLE
     // Identical firmware on both boards: establish the role now that the radio
     // is armed, then re-apply the link with the elected address and reset the
@@ -338,9 +345,6 @@ void Device::Setup() {
     // before any transparent data flows. Human-readable and one line (like the
     // pairing banners), so a host connected at boot sees which build it's on.
     g_host.Emit("[LoRa-Serial] " FW_VERSION "\r\n");
-#ifdef HAS_DISPLAY
-    g_display.Init();   // OLED status bar + teletype (display-equipped boards)
-#endif
 }
 
 // --------------------------------------------------------------------------
@@ -349,7 +353,9 @@ void Device::Setup() {
 void Device::Loop() {
     g_diag.Pet();  // mark loop alive (also petted from g_host.Poll on waits)
 #ifdef HAS_DISPLAY
-    g_display.Tick();   // refresh the OLED status bar / teletype (rate-limited)
+    // Apply any config-menu change here, in the main-loop context, so the menu
+    // never pokes the radio/link/flash from the display task (which deadlocks).
+    g_display.ServiceConfig();
 #endif
 #if DEBUG_BRINGUP
     static uint32_t s_hb_at = 0, s_hb_n = 0;

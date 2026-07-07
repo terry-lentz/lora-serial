@@ -5,11 +5,11 @@
  *
  * The firmware keeps its settings in a `Preferences` handle named `prefs`. On
  * the ESP32 that is the real IDF NVS-backed class. On the nRF52 (Wio Tracker
- * L1) there is no `Preferences`, so this provides a same-signature class. The
- * nRF52 version is currently a NO-OP stub: every read returns the caller's
- * default and every write is discarded, so the node runs on its compile-time
- * defaults (build flags). A flash/InternalFS-backed implementation replaces the
- * stub later; because the API matches, no call site changes when it does.
+ * L1) there is no `Preferences`, so this provides a same-signature class backed
+ * by the Adafruit nRF52 core's internal LittleFS (InternalFS): each key is a
+ * small file under a namespace directory, so settings survive a reboot exactly
+ * like the ESP32's NVS. The bodies live in prefs_nrf52.cpp (headers declare,
+ * .cpp defines); because the API matches, no call site changes between MCUs.
  *
  * Include this instead of <Preferences.h> so the same src/ builds on both MCUs.
  */
@@ -26,210 +26,148 @@
 #include <string.h>
 
 /**
- * @brief Defaults-only, Arduino-`Preferences`-compatible key/value store.
+ * @brief LittleFS-backed, Arduino-`Preferences`-compatible key/value store.
  *
- * Reads return the supplied default; writes are discarded. Lets the node build
- * and run on its compile-time defaults on a target without NVS. Not persistent
- * (yet) — a flash-backed implementation will replace the bodies.
+ * Each key is stored as its own small file under a namespace directory in the
+ * nRF52's internal flash (InternalFS), so settings persist across reboots just
+ * like the ESP32's NVS. One file per key keeps writes independent — a value
+ * updated from one context never has to read-modify-write another's. Defined in
+ * prefs_nrf52.cpp.
  */
 class Preferences {
  public:
   /**
-   * @brief Open a namespace (no-op).
-   * @param[in] name       namespace name (ignored).
-   * @param[in] read_only  open read-only (ignored).
-   * @return always true (as if the namespace opened).
+   * @brief Open (and mount) a namespace directory.
+   * @param[in] name       namespace name; becomes the flash directory "/name".
+   * @param[in] read_only  if true, writes are rejected.
+   * @return true once InternalFS is mounted and the directory exists.
    */
-  bool begin(const char* name, bool read_only = false) {
-    (void)name;
-    (void)read_only;
-    return true;
-  }
+  bool begin(const char* name, bool read_only = false);
 
-  /** @brief Close the namespace (no-op). */
-  void end() {}
+  /** @brief Close the namespace (flushes are immediate, so a no-op here). */
+  void end();
 
   /**
-   * @brief Erase all keys (no-op).
-   * @return always true.
+   * @brief Erase every key in the namespace directory.
+   * @return true on success.
    */
-  bool clear() { return true; }
+  bool clear();
 
   /**
    * @brief Whether a key exists.
-   * @param[in] key  key name (ignored).
-   * @return always false (nothing is stored).
+   * @param[in] key  key name.
+   * @return true if the backing file is present.
    */
-  bool isKey(const char* key) {
-    (void)key;
-    return false;
-  }
+  bool isKey(const char* key);
 
   /**
    * @brief Read an 8-bit value.
-   * @param[in] key  key name (ignored).
-   * @param[in] def  value to return.
-   * @return def.
+   * @param[in] key  key name.
+   * @param[in] def  value to return when the key is absent.
+   * @return the stored value, or def.
    */
-  uint8_t getUChar(const char* key, uint8_t def = 0) {
-    (void)key;
-    return def;
-  }
+  uint8_t getUChar(const char* key, uint8_t def = 0);
   /**
-   * @brief Write an 8-bit value (discarded).
-   * @param[in] key  key name (ignored).
-   * @param[in] val  value (ignored).
-   * @return 1 (bytes "written").
+   * @brief Write an 8-bit value.
+   * @param[in] key  key name. @param[in] val  value.
+   * @return bytes written (1), or 0 on failure.
    */
-  size_t putUChar(const char* key, uint8_t val) {
-    (void)key;
-    (void)val;
-    return 1;
-  }
+  size_t putUChar(const char* key, uint8_t val);
 
   /**
    * @brief Read a 16-bit value.
-   * @param[in] key  key name (ignored).
-   * @param[in] def  value to return.
-   * @return def.
+   * @param[in] key  key name.
+   * @param[in] def  value to return when the key is absent.
+   * @return the stored value, or def.
    */
-  uint16_t getUShort(const char* key, uint16_t def = 0) {
-    (void)key;
-    return def;
-  }
+  uint16_t getUShort(const char* key, uint16_t def = 0);
   /**
-   * @brief Write a 16-bit value (discarded).
-   * @param[in] key  key name (ignored).
-   * @param[in] val  value (ignored).
-   * @return 2.
+   * @brief Write a 16-bit value.
+   * @param[in] key  key name. @param[in] val  value.
+   * @return bytes written (2), or 0 on failure.
    */
-  size_t putUShort(const char* key, uint16_t val) {
-    (void)key;
-    (void)val;
-    return 2;
-  }
+  size_t putUShort(const char* key, uint16_t val);
 
   /**
    * @brief Read a 32-bit value.
-   * @param[in] key  key name (ignored).
-   * @param[in] def  value to return.
-   * @return def.
+   * @param[in] key  key name.
+   * @param[in] def  value to return when the key is absent.
+   * @return the stored value, or def.
    */
-  uint32_t getUInt(const char* key, uint32_t def = 0) {
-    (void)key;
-    return def;
-  }
+  uint32_t getUInt(const char* key, uint32_t def = 0);
   /**
-   * @brief Write a 32-bit value (discarded).
-   * @param[in] key  key name (ignored).
-   * @param[in] val  value (ignored).
-   * @return 4.
+   * @brief Write a 32-bit value.
+   * @param[in] key  key name. @param[in] val  value.
+   * @return bytes written (4), or 0 on failure.
    */
-  size_t putUInt(const char* key, uint32_t val) {
-    (void)key;
-    (void)val;
-    return 4;
-  }
+  size_t putUInt(const char* key, uint32_t val);
 
   /**
    * @brief Read a 64-bit value.
-   * @param[in] key  key name (ignored).
-   * @param[in] def  value to return.
-   * @return def.
+   * @param[in] key  key name.
+   * @param[in] def  value to return when the key is absent.
+   * @return the stored value, or def.
    */
-  uint64_t getULong64(const char* key, uint64_t def = 0) {
-    (void)key;
-    return def;
-  }
+  uint64_t getULong64(const char* key, uint64_t def = 0);
   /**
-   * @brief Write a 64-bit value (discarded).
-   * @param[in] key  key name (ignored).
-   * @param[in] val  value (ignored).
-   * @return 8.
+   * @brief Write a 64-bit value.
+   * @param[in] key  key name. @param[in] val  value.
+   * @return bytes written (8), or 0 on failure.
    */
-  size_t putULong64(const char* key, uint64_t val) {
-    (void)key;
-    (void)val;
-    return 8;
-  }
+  size_t putULong64(const char* key, uint64_t val);
 
   /**
    * @brief Read a float value.
-   * @param[in] key  key name (ignored).
-   * @param[in] def  value to return.
-   * @return def.
+   * @param[in] key  key name.
+   * @param[in] def  value to return when the key is absent.
+   * @return the stored value, or def.
    */
-  float getFloat(const char* key, float def = 0.0f) {
-    (void)key;
-    return def;
-  }
+  float getFloat(const char* key, float def = 0.0f);
   /**
-   * @brief Write a float value (discarded).
-   * @param[in] key  key name (ignored).
-   * @param[in] val  value (ignored).
-   * @return sizeof(float).
+   * @brief Write a float value.
+   * @param[in] key  key name. @param[in] val  value.
+   * @return bytes written (sizeof(float)), or 0 on failure.
    */
-  size_t putFloat(const char* key, float val) {
-    (void)key;
-    (void)val;
-    return sizeof(float);
-  }
+  size_t putFloat(const char* key, float val);
 
   /**
    * @brief Read a string value.
-   * @param[in] key  key name (ignored).
-   * @param[in] def  value to return.
-   * @return def.
+   * @param[in] key  key name.
+   * @param[in] def  value to return when the key is absent.
+   * @return the stored string, or def.
    */
-  String getString(const char* key, const String& def = String()) {
-    (void)key;
-    return def;
-  }
+  String getString(const char* key, const String& def = String());
   /**
-   * @brief Write a string value (discarded).
-   * @param[in] key  key name (ignored).
-   * @param[in] val  value (ignored).
-   * @return the string length.
+   * @brief Write a string value (stored without a trailing NUL).
+   * @param[in] key  key name. @param[in] val  NUL-terminated source.
+   * @return bytes written (the string length), or 0 on failure.
    */
-  size_t putString(const char* key, const char* val) {
-    (void)key;
-    return val ? strlen(val) : 0;
-  }
+  size_t putString(const char* key, const char* val);
 
   /**
-   * @brief Read a blob into a caller buffer (none stored).
-   * @param[in]  key  key name (ignored).
-   * @param[out] buf  destination (ignored).
-   * @param[in]  len  capacity (ignored).
-   * @return 0 (nothing copied).
+   * @brief Read a blob into a caller buffer.
+   * @param[in]  key  key name.
+   * @param[out] buf  destination buffer.
+   * @param[in]  len  buffer capacity.
+   * @return bytes copied (0 if the key is absent).
    */
-  size_t getBytes(const char* key, void* buf, size_t len) {
-    (void)key;
-    (void)buf;
-    (void)len;
-    return 0;
-  }
+  size_t getBytes(const char* key, void* buf, size_t len);
   /**
-   * @brief Write a blob (discarded).
-   * @param[in] key  key name (ignored).
-   * @param[in] buf  source (ignored).
-   * @param[in] len  length.
-   * @return len.
+   * @brief Write a blob, replacing any prior value.
+   * @param[in] key  key name. @param[in] buf  source. @param[in] len  length.
+   * @return bytes written, or 0 on failure.
    */
-  size_t putBytes(const char* key, const void* buf, size_t len) {
-    (void)key;
-    (void)buf;
-    return len;
-  }
+  size_t putBytes(const char* key, const void* buf, size_t len);
   /**
-   * @brief Length of a stored blob (none stored).
-   * @param[in] key  key name (ignored).
-   * @return 0.
+   * @brief Length of a stored blob.
+   * @param[in] key  key name.
+   * @return the file size in bytes, or 0 if absent.
    */
-  size_t getBytesLength(const char* key) {
-    (void)key;
-    return 0;
-  }
+  size_t getBytesLength(const char* key);
+
+ private:
+  char ns_[24] = {0};   ///< namespace directory path, e.g. "/loramodem"
+  bool ro_ = false;     ///< opened read-only (writes rejected)
 };
 
 #endif  // ARDUINO_ARCH_ESP32
