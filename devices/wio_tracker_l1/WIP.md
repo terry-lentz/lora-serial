@@ -99,6 +99,15 @@ solved then).
 - [ ] nRF52 diag hardening: software watchdog + reset-surviving crash breadcrumb
       (currently `fw_diag_nrf52.cpp` reports boots/reset-cause/heap only).
 
+## Future ideas
+
+- **BLE keyboard → standalone LoRa terminal.** The nRF52840's BLE is resident
+  (S140 SoftDevice already flashed), so the L1 can act as a BLE HID *central* and
+  connect to a Bluetooth keyboard; keystrokes feed the same host-input path as
+  the USB CDC → the display node becomes a pocket terminal (screen + keyboard, no
+  host computer). Requires enabling the SoftDevice (we currently run without BLE
+  — which is why direct RNG/register access is fine). Tabled for now.
+
 ## References
 
 - Pin map / variant: Meshtastic `variants/nrf52840/seeed_wio_tracker_L1/`.

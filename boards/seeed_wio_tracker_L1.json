@@ -5,7 +5,18 @@
     },
     "core": "nRF5",
     "cpu": "cortex-m4",
-    "extra_flags": "-DARDUINO_NRF52840_FEATHER -DNRF52840_XXAA -DSEEED_WIO_TRACKER_L1",
+    "extra_flags": [
+      "-DARDUINO_NRF52840_FEATHER",
+      "-DNRF52840_XXAA",
+      "-DSEEED_WIO_TRACKER_L1",
+      "-DHAS_DISPLAY",
+      "-DBOARD_LORA_NSS=4",
+      "-DBOARD_LORA_DIO1=1",
+      "-DBOARD_LORA_RST=2",
+      "-DBOARD_LORA_BUSY=3",
+      "-DBOARD_LORA_RXEN=5",
+      "-DBOARD_LED_PIN=11"
+    ],
     "f_cpu": "64000000L",
     "hwids": [
       ["0x2886", "0x8029"]

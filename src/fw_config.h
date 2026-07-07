@@ -15,7 +15,6 @@
 #include "adr.h"            // link_layer::AdrController — 'auto' mode decisions
 #include "linklayer.h"
 #include "modeswitch.h"     // coordinated runtime PHY mode-switch handshake
-#include "platform/board.h" // per-board SX1262 pins, LED, RF-switch wiring
 #include "platform/prefs.h" // Preferences: NVS on ESP32, stub on nRF52
 #include "x25519.h"         // ECDH for AT+TRAIN secure pairing
 
@@ -283,6 +282,17 @@ extern volatile uint8_t g_dbg_rx;
  *        multi-second radio ops. Wired to Host::IdleHook in setup().
  */
 extern void (*g_rx_idle_hook)();
+
+/**
+ * @brief Hook called with each chunk of device->host bytes (the received serial
+ *        stream) as it is delivered to the host port. Null unless a board wires
+ *        it up — the display node (fw_display) taps it to drive the OLED
+ *        teletype. Does not affect the USB data path.
+ *
+ * @param[in] data  the bytes being delivered to the host. Not null when len>0.
+ * @param[in] len   number of bytes.
+ */
+extern void (*g_host_out_hook)(const uint8_t* data, size_t len);
 
 // Turn-taking timing (derived per-mode from time-on-air) now lives in the Radio
 // class — read it via g_radio.toa_ms(), g_radio.interframe_ms(),

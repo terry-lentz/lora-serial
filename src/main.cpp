@@ -51,6 +51,8 @@ Module               radio_module(kPinNss, kPinDio1, kPinRst, kPinBusy);
 SX1262               radio(&radio_module);
 
 void (*g_rx_idle_hook)() = nullptr;           ///< radio-wait host-I/O idle hook
+/// device->host byte tap (OLED teletype on display boards); null otherwise.
+void (*g_host_out_hook)(const uint8_t*, size_t) = nullptr;
 
 uint8_t  g_link_key[16];                       ///< active AEAD key (live swap)
 uint8_t  g_static_key[16];                     ///< long-term/static AEAD key

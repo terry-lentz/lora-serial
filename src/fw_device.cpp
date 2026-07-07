@@ -19,6 +19,9 @@
 #include "fw_session.h"  // per-session key handshake (forward secrecy)
 #include "identity.h"    // link_layer::ElectInitiator — MAC-based election
 #include "platform/platform.h"  // platform::DeviceId, platform::Random32
+#ifdef HAS_DISPLAY
+#include "fw_display.h"  // g_display: OLED status bar + teletype
+#endif
 
 // Single-image safety guard. Both boards flash the SAME node_raw image and
 // MUST auto-elect distinct roles/addresses from their MACs at runtime
@@ -335,6 +338,9 @@ void Device::Setup() {
     // before any transparent data flows. Human-readable and one line (like the
     // pairing banners), so a host connected at boot sees which build it's on.
     g_host.Emit("[LoRa-Serial] " FW_VERSION "\r\n");
+#ifdef HAS_DISPLAY
+    g_display.Init();   // OLED status bar + teletype (display-equipped boards)
+#endif
 }
 
 // --------------------------------------------------------------------------
@@ -342,6 +348,9 @@ void Device::Setup() {
 // --------------------------------------------------------------------------
 void Device::Loop() {
     g_diag.Pet();  // mark loop alive (also petted from g_host.Poll on waits)
+#ifdef HAS_DISPLAY
+    g_display.Tick();   // refresh the OLED status bar / teletype (rate-limited)
+#endif
 #if DEBUG_BRINGUP
     static uint32_t s_hb_at = 0, s_hb_n = 0;
     s_hb_n++;

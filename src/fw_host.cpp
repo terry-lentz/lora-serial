@@ -373,6 +373,9 @@ void   Host::HtPush(const uint8_t* b, size_t n) {  // caller: HtFree() >= n
         host_tx_[ht_head_] = b[i];
         ht_head_ = (ht_head_ + 1) % sizeof(host_tx_);
     }
+    // Mirror the host-bound bytes to any display tap (OLED teletype). No-op on
+    // boards without a display (the hook is null).
+    if (g_host_out_hook) g_host_out_hook(b, n);
 }
 void Host::HostTxDrain() {
     // Device->host output via TinyUSB, GATED on the terminal being open
