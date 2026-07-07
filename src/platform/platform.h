@@ -42,6 +42,23 @@ void DeviceId(uint8_t out[6]);
  */
 uint32_t Random32();
 
+// ---- System control ------------------------------------------------------
+/**
+ * @brief Feed the loop/hardware watchdog during a long blocking wait, so a
+ *        legitimate multi-second radio wait is never mistaken for a hang.
+ *        A no-op on targets without a software watchdog.
+ */
+void WatchdogFeed();
+
+/** @brief Reset the MCU now. Does not return. */
+void Reboot();
+
+/**
+ * @brief Best-effort resize of the host CDC receive FIFO.
+ * @param[in] bytes  desired RX buffer size; ignored where the FIFO is fixed.
+ */
+void HostSetRxBufferSize(size_t bytes);
+
 // ---- Host USB-CDC output (device -> host) --------------------------------
 // The transparent data plane writes to the CDC IN endpoint at this low level
 // (not Arduino Serial.write) so a slow reader can never block the radio loop:

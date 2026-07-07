@@ -164,7 +164,10 @@ static const uint8_t kLinkKey[16] = {
  *        923.2 MHz keeps a BW125 (and even BW500) channel inside the band.
  *        VERIFY legal TX power / duty cycle before field use.
  */
-static const float    kFreqMhz     = 923.2f;
+#ifndef CFG_FREQ
+#define CFG_FREQ 923.2f   ///< default carrier (MHz); override with -D per env
+#endif
+static const float    kFreqMhz     = CFG_FREQ;  ///< default carrier (MHz)
 static const uint8_t  kSyncWord    = 0x12;   ///< private link (not LoRaWAN)
 static const uint16_t kPreamble     = 8;     ///< min-ish; shaves airtime/frame
 static const float    kTcxoV       = 1.8f;   ///< Wio-SX1262 TCXO on SX1262 DIO3

@@ -16,6 +16,7 @@
 
 #include "adr.h"        // link_layer::AdrLadder, from the radio mode table
 #include "fw_host.h"   // g_host.ApplyLinkTiming() — re-push ToA-derived timing
+#include "platform/platform.h"  // platform::WatchdogFeed in long radio waits
 
 // INTERRUPT-DRIVEN RX (docs/INTERRUPT_RX.md). A high-priority radio task,
 // woken by the DIO1 interrupt, drains the SX1262 FIFO promptly on the DIO1 edge
@@ -230,7 +231,7 @@ void Radio::Reinit() {
     const int kNssPin = BOARD_LORA_NSS;    // SX1262 NSS  (per platform/board.h)
     pinMode(kNrstPin, OUTPUT);
     for (int i = 0; i < 3; i++) {    // 3 long pulses to unstick it
-        feedLoopWDT();
+        platform::WatchdogFeed();
         digitalWrite(kNrstPin, LOW);
         delay(100);  // 100 ms low — far longer than RadioLib's reset()
         digitalWrite(kNrstPin, HIGH);
@@ -241,7 +242,7 @@ void Radio::Reinit() {
     delay(10);
     digitalWrite(kNssPin, HIGH);
     delay(250);  // XOSC/TCXO settle after reset
-    feedLoopWDT();   // give begin()/ApplyRadioFsk() a fresh 5 s WDT window
+    platform::WatchdogFeed();   // a fresh WDT window for radio begin()
     if (phy_fsk_) {
         ApplyRadioFsk();                 // re-init in GFSK at the GFSK params
         Unlock();
@@ -249,7 +250,7 @@ void Radio::Reinit() {
     }
     radio.begin(cfg.freq_mhz, BwFromCode(cfg.bw_code), cfg.sf, cfg.cr,
                 cfg.sync, tx_power_, kPreamble, kTcxoV, false);
-    feedLoopWDT();
+    platform::WatchdogFeed();
     RadioCommonSetup(true);
     DeriveTiming();
     Unlock();
@@ -397,7 +398,7 @@ int16_t Radio::Rx(uint8_t* buf, size_t max_len, size_t& out_len,
         // but pairing NULLs that hook. Either way a > 5 s stretch would reboot
         // us. The wait is bounded by timeout_ms, so the WDT still catches a
         // true hang elsewhere.
-        feedLoopWDT();
+        platform::WatchdogFeed();
         size_t n = rx_ring_.Pop(buf, max_len);
         if (n) { out_len = n; return RADIOLIB_ERR_NONE; }
         if (millis() - istart > timeout_ms) return RADIOLIB_ERR_RX_TIMEOUT;
@@ -428,7 +429,7 @@ void Radio::Tx(const uint8_t* buf, size_t len) {
     uint32_t start = millis();
     while (!operation_done_) {
         if (millis() - start > tx_safety) break;     // stuck-radio safety
-        feedLoopWDT();   // keep the task-WDT fed even when the idle hook is off
+        platform::WatchdogFeed();   // keep the WDT fed when idle hook is off
         if (g_rx_idle_hook) g_rx_idle_hook();
         delay(1);
     }

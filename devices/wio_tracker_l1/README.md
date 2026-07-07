@@ -5,35 +5,35 @@ A second hardware target for this project: the **Seeed Wio Tracker L1 Pro**
 LoRa and shows the data on its screen**. The long-term goal is a display node for
 the transparent link (e.g. rendering a stock-ticker feed sent from a node).
 
-> **Status:** the hardware bring-up is proven end-to-end — the board builds,
-> flashes, drives its OLED, and **receives our PHY over the air** (validated
-> against the bench beacon, RSSI ≈ −25 dBm, no drops). It does **not yet** speak
-> the real link protocol; it currently receives a raw-PHY beacon. See
-> [WIP.md](WIP.md) for the running technical log and TODOs.
+> **Status:** the hardware bring-up is proven end-to-end (the board builds,
+> flashes, drives its OLED, and **received our PHY over the air** — bench beacon,
+> RSSI ≈ −25 dBm, no drops), and the **real node firmware now compiles for the
+> L1** as a first-class env (`wio_l1`). Not yet flashed/link-tested on hardware,
+> and the display isn't wired into the node firmware yet. See [WIP.md](WIP.md)
+> for the running technical log and TODOs.
 
-This is a self-contained sub-project. It shares only the portable link core in
-`../../lib/linklayer` (not yet wired in). It does **not** affect the primary
-ESP32 firmware (`node_raw`).
+The L1 runs the **same `src/` firmware as `node_raw`**, chosen at build time via
+the platform abstraction in `src/platform/` — it does **not** affect the ESP32
+build. This folder holds the L1's docs and a bench transmitter.
 
-## Why a separate target (not just another env)
+## Why a shared codebase (not a fork)
 
-The L1 is an **nRF52840** (ARM Cortex-M4F) — a different MCU family from the
-XIAO ESP32-S3. Different core, USB stack, flashing, and SoftDevice. The portable
-`lib/linklayer/` ports for free; everything platform-specific is reimplemented
-here. Kept as its own folder so the nRF52 toolchain never destabilises the
-working ESP32 build. When it matures it can be promoted to a first-class
-`[env:…]` in the root `platformio.ini`.
+The L1 is an **nRF52840** (ARM Cortex-M4F) — a different MCU family from the XIAO
+ESP32-S3 (different core, USB stack, flashing, SoftDevice). The portable
+`lib/linklayer/` ports for free; the ~handful of MCU-specific calls sit behind
+`src/platform/` (`platform_{esp32,nrf52}.cpp`, `prefs.h`, `rtos.h`, `board.h`),
+so the *same* `src/fw_*.cpp` compiles for both — guaranteeing the two ends speak
+an identical protocol. The diag layer is split (`fw_diag_{esp32,nrf52}.cpp`).
 
-## Layout
+## Layout (repo root)
 
 ```
+platformio.ini                 [env:wio_l1] — the L1 build (S140 7.3.0)
+boards/seeed_wio_tracker_L1.json   custom board def
+variants/seeed_wio_tracker_L1/     pin map + nrf52840_s140_v7.ld
+tools/install_nrf52_ldscript.py    pre-build hook (installs the v7 script)
+src/ + src/platform/               shared firmware + platform abstraction
 devices/wio_tracker_l1/
-  platformio.ini        env:wio_l1 — the nRF52 build (S140 7.3.0 board def)
-  boards/               custom PlatformIO board def (targets S140 7.3.0)
-  variants/             vendored Seeed pin map (Meshtastic variant)
-  linker/               S140 v7 linker script (app @ 0x27000)
-  scripts/              pre-build hook that installs the linker script
-  src/main.cpp          the display-node app
   beacon_xiao/          bench transmitter (XIAO ESP32S3) for RF testing
   README.md  WIP.md
 ```
@@ -44,7 +44,7 @@ devices/wio_tracker_l1/
 |---|---|---|
 | SX1262 NSS / DIO1 / BUSY / RESET | D4 / D1 / D3 / D2 | via variant defines |
 | SPI SCK / MISO / MOSI | 8 / 9 / 10 | |
-| RF switch | RXEN = D5 (held high, RX-only); DIO2 = module T/R | |
+| RF switch | RXEN = D5 (RadioLib toggles per TX/RX); DIO2 = module T/R | |
 | TCXO | DIO3 @ 1.8 V | same Wio-SX1262 module as the XIAO |
 | OLED (SH1106) | I²C SDA=D14 / SCL=D15, **addr 0x3D** | 1.3″ 128×64 |
 | User button | D13 (active-low) | cycles OLED brightness |
@@ -59,11 +59,13 @@ pio pkg install -g -p nordicnrf52     # the nRF52 platform (one-time)
 ## Build
 
 ```sh
-pio run -d devices/wio_tracker_l1
-# -> .pio/build/wio_l1/firmware.hex  (converted to firmware.uf2 to flash)
+pio run -e wio_l1
+# -> .pio/build/wio_l1/firmware.hex  (convert to firmware.uf2 to flash)
 ```
-A pre-build hook (`scripts/install_ldscript.py`) installs the S140 v7 linker
-script into the framework, so a fresh checkout builds cleanly.
+A pre-build hook (`tools/install_nrf52_ldscript.py`) installs the S140 v7 linker
+script into the framework, so a fresh checkout builds cleanly. First bring-up
+uses a **minimal interop config** (no encryption/pairing, static roles, fixed
+`medium` mode, 921 MHz) set in the `[env:wio_l1]` build flags.
 
 Make the UF2:
 ```sh

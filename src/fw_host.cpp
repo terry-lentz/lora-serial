@@ -150,7 +150,7 @@ void Host::Poll() {
     // core's small queue never overflows; then feed the link from the ring at
     // link rate.
     while (Serial.available() && IngestFree() > kIngestLowFree) {
-        feedLoopWDT();   // a host flood can keep this reading a while; stay fed
+        platform::WatchdogFeed();   // a host flood can read a while; stay fed
         uint8_t raw[kBulkReadBytes];
         size_t want = Serial.available();
         if (want > sizeof(raw)) want = sizeof(raw);
@@ -446,7 +446,7 @@ size_t Host::IngestPush(const uint8_t* s, size_t n) {
 // (backpressure-safe).
 void Host::IngestToLink() {
     while (IngestCount() > 0) {
-        feedLoopWDT();   // draining a large backlog to the link; stay fed
+        platform::WatchdogFeed();   // draining a large backlog; stay fed
         size_t contig = (in_head_ >= in_tail_) ? (in_head_ - in_tail_)
                                              : (ingest_cap_ - in_tail_);
         size_t w = g_link.Write(ingest_ + in_tail_, contig);

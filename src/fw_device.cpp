@@ -231,7 +231,7 @@ void Device::Setup() {
     // reliability.
     li_idle_gap_ = kFastGapMs;   // seed the initiator's idle backoff (was the
                                  // function-static init of the old idle_gap)
-    Serial.setRxBufferSize(kUsbRxBufBytes);
+    platform::HostSetRxBufferSize(kUsbRxBufBytes);
     g_host.IngestInit();   // claim the PSRAM host->link ingest ring before I/O
     Serial.begin(kSerialBaud);
     pinMode(LED_PIN, OUTPUT);
@@ -256,7 +256,7 @@ void Device::Setup() {
         state = radio.begin(kFreqMhz, BwFromCode(kCtrlBwCode), kCtrlSf,
                             kCtrlCr, kSyncWord, kTxPowerDbm, kPreamble,
                             kTcxoV, false);
-        if (state != RADIOLIB_ERR_NONE && (tries % 20) == 0) ESP.restart();
+        if (state != RADIOLIB_ERR_NONE && (tries % 20) == 0) platform::Reboot();
     }
     BG("[BG] S1 radio.begin ok\r\n");
     // Shared post-begin() setup (RF switch, CRC, DIO1 IRQ) AND the bounded SPI

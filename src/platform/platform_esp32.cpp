@@ -23,6 +23,15 @@ void DeviceId(uint8_t out[6]) { esp_read_mac(out, ESP_MAC_WIFI_STA); }
 // The IDF hardware RNG (bootloader-seeded, RF-noise conditioned).
 uint32_t Random32() { return esp_random(); }
 
+// Feed the Arduino loop task's IDF Task Watchdog (armed in Diag::Init).
+void WatchdogFeed() { feedLoopWDT(); }
+
+// Clean software reset.
+void Reboot() { ESP.restart(); }
+
+// The ESP32 USB-CDC RX FIFO is resizable; a large buffer absorbs host bursts.
+void HostSetRxBufferSize(size_t bytes) { Serial.setRxBufferSize(bytes); }
+
 // Device->host CDC, at the TinyUSB level (see platform.h for why not Serial).
 bool HostCdcConnected() { return tud_cdc_connected(); }
 uint32_t HostCdcWriteAvailable() { return tud_cdc_write_available(); }
