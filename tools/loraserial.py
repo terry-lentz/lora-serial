@@ -36,15 +36,16 @@ class Board:
         self.s.write(b"+++")
         self.s.flush()
         time.sleep(ESCAPE_GUARD_S + 0.2)
-        self.s.read(200)                       # consume "OK" / echoed plus signs
-        self.s.write(b"\r\n")                   # flush any buffered "+++" as a line
+        self.s.read(200)       # consume "OK" / echoed plus signs
+        self.s.write(b"\r\n")  # flush any buffered "+++" as a line
         self.s.flush()
         time.sleep(0.3)
         self.s.read(200)
 
     def at(self, cmd, wait=0.7, nbytes=8000):
         """Run one AT command (must already be in AT mode) and return the reply
-        text. Strips nothing structural — the caller sees what the board sent."""
+        text. Strips nothing structural — the caller sees what the board
+        sent."""
         self.s.write((cmd + "\r\n").encode())
         self.s.flush()
         time.sleep(wait)

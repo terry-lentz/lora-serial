@@ -6,8 +6,8 @@ prints a compact one-line status — handy in a tmux/terminal split for watching
 ADR adapt as you move the boards apart, or watching RSSI/SNR/retransmits during
 a transfer.
 
-    python3 host/lora_status.py /dev/ttyACM0            # 5 s interval
-    python3 host/lora_status.py /dev/ttyACM0 --interval 3
+    tools/lora_status.py /dev/ttyACM0            # 5 s interval
+    tools/lora_status.py /dev/ttyACM0 --interval 3
 
 IMPORTANT: there is ONE shared radio channel and no out-of-band telemetry, so
 each poll briefly drops this board into AT command mode (~2 s) — which diverts

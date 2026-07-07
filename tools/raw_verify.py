@@ -5,12 +5,12 @@
 Streams a known pattern TX_PORT -> RX_PORT and verifies every byte (md5), at
 full host speed (non-blocking writes that deliberately OVERRUN the link) to
 exercise the board's PSRAM ingest buffering. Single-threaded write+always-drain
-so the host
-reader can never starve — host-side artifacts can't masquerade as device loss.
+so the host reader can never starve — host-side artifacts can't masquerade as
+device loss. (For a paced per-mode throughput measurement, use lora_xfer.py.)
 
 Usage:
-    python3 host/raw_verify.py --tx /dev/ttyACM1 --rx /dev/ttyACM0 --size 131072
-    python3 host/raw_verify.py --size 262144 --pattern random   # incompressible
+    tools/raw_verify.py --tx /dev/ttyACM1 --rx /dev/ttyACM0 --size 131072
+    tools/raw_verify.py --size 262144 --pattern random   # incompressible
 
 Tip: query the board mid/post-run with the +++ AT mode (AT+LINK?) to see
 hin/hout/idrop counters — idrop>0 means the stream exceeded the ingest ring.

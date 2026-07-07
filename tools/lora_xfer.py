@@ -54,12 +54,12 @@ def main():
     ap.add_argument("tx_port")
     ap.add_argument("rx_port")
     ap.add_argument("nbytes", type=int)
-    ap.add_argument("--mode", help="pin this mode on both ends first (AT+FMODE)")
+    ap.add_argument("--mode", help="pin this mode on both ends (AT+FMODE)")
     ap.add_argument("--pattern", default="seq",
                     choices=["seq", "zeros", "text", "random"],
                     help="payload compressibility (default seq)")
     ap.add_argument("--timeout", type=float, default=300.0,
-                    help="overall wall-clock limit (s); raise for big/slow runs")
+                    help="overall wall-clock limit (s); raise for slow runs")
     # --idle must exceed the mode's round-trip or a slow link looks 'stalled':
     # far/SF12 frames are ~13 s of airtime, so 8 s falsely gave up before the
     # first frame even arrived. 60 s covers far's round-trips; a successful
@@ -67,7 +67,7 @@ def main():
     # long a genuinely stalled transfer waits before giving up.
     ap.add_argument("--idle", type=float, default=60.0,
                     help="give up after this many seconds with no new bytes "
-                         "(needs to exceed the mode's round-trip; far ~ tens of s)")
+                         "(must exceed the mode's round-trip; far ~ tens of s)")
     a = ap.parse_args()
 
     tx, rx = Board(a.tx_port), Board(a.rx_port)

@@ -12,8 +12,10 @@ capability one of these almost has, add it here rather than starting fresh.
 | `coredump.sh <env> <port>` | Pull and decode a crash core dump from a board (needs the matching firmware.elf). |
 | `install_nrf52_ldscript.py` | PlatformIO **pre-build hook** (not run by hand): installs the S140 v7 linker script into the nRF52 framework so `wio_l1` links at the right SoftDevice offset. |
 | `at.py <port> <cmd> ...` | Run AT commands (auto `+++` escape) and print the replies. `--until SUBSTR [--timeout SEC]` waits for a delayed result (e.g. a slow-mode `AT+SPEEDTEST`). |
-| `lora_xfer.py <tx> <rx> <n>` | Throughput + byte-exactness test over the serial cable; can pin a mode first. |
-| `loraserial.py` | Shared Python lib (`Board` class) the two `.py` tools build on. |
+| `lora_xfer.py <tx> <rx> <n>` | **Paced** throughput + byte-exactness test over the serial cable; can pin a mode first (the standard bench throughput measurement). |
+| `raw_verify.py --tx <p> --rx <p> --size <n>` | **Overrun** integrity test: streams a known pattern at full host speed to deliberately overrun the link and md5-verify every byte — stresses the PSRAM ingest buffering (`--pattern random` for incompressible). |
+| `lora_status.py <port> [--interval S]` | Live one-line link/health monitor — polls `AT+MODE?`/`AT+LINK?`/`AT+DIAG` on an interval (each poll briefly enters AT mode, so watch a bench board, not a live shell). |
+| `loraserial.py` | Shared Python lib (`Board` class) the AT/transfer tools build on. |
 | `version.py` | PlatformIO **pre-build hook** (not run by hand): stamps the firmware with its version from `git describe` as `-D FW_VERSION`. Reported by `ATI` / `AT+VER` / the boot banner. |
 
 ## Examples

@@ -26,7 +26,7 @@ FLASH  := ./tools/upload_flash.sh
 # Source files we hold to the 80-column rule (vendored libs are exempt).
 FMT_FILES := $(wildcard src/*.cpp src/*.h lib/linklayer/*.h lib/linklayer/*.cpp \
                         test/test_link/*.cpp test/test_modem/*.cpp \
-                        test/test_sim/*.cpp host/*.py)
+                        test/test_sim/*.cpp tools/*.py)
 
 .PHONY: all build test flash boards monitor format-check clean help
 

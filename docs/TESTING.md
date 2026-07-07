@@ -170,7 +170,7 @@ validation** — never flash to debug something the sim could have caught.
 
 ## Host-side byte-exact check (with hardware)
 
-Once flashed, [`host/raw_verify.py`](../host/raw_verify.py) sends a known stream
+Once flashed, [`tools/raw_verify.py`](../tools/raw_verify.py) sends a known stream
 through the real link and verifies the bytes returned are identical — the on-hardware
 analogue of the sim's byte-exact assertion, and the artifact to attach to any
 reliability bug report.

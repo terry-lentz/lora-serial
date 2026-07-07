@@ -236,7 +236,7 @@ method that has repeatedly caught real bugs before they reached hardware.
      reports KB/s + retx, so no second host program is needed —
      `tools/at.py <initiator> AT+SPEEDTEST=64 --until KB/s --timeout 120`. For a
      byte-exact end-to-end check over the transparent transport, stream between
-     the two ports with `host/raw_verify.py` / `tools/lora_xfer.py`.
+     the two ports with `tools/raw_verify.py` / `tools/lora_xfer.py`.
    - **Exercise a scenario.** e.g. a mode switch: `AT+MODE=<name>` on the
      **initiator** coordinates BOTH ends (the responder follows), then send
      data. A `medium`→`ludicrous` switch followed by a speedtest is the GFSK

@@ -17,26 +17,26 @@ board (recoverably; NVS survives) so you can verify the tooling end-to-end.
 
 ```bash
 # panic path: illegal write -> ESP panic -> core dump to flash -> reboot
-python3 host/atcmd.py /dev/ttyACM0 AT+CRASH=panic
+tools/at.py /dev/ttyACM0 AT+CRASH=panic
 
 # hang path: stop returning to loop() -> software watchdog reboots after ~25 s
-python3 host/atcmd.py /dev/ttyACM0 AT+CRASH=hang
+tools/at.py /dev/ttyACM0 AT+CRASH=hang
 ```
 
 ### Worked example — the panic path (real output)
 
 1. Baseline, then crash:
    ```
-   $ python3 host/atcmd.py /dev/ttyACM0 AT+DIAG
+   $ tools/at.py /dev/ttyACM0 AT+DIAG
    boots=5 ... coredump=no
-   $ python3 host/atcmd.py /dev/ttyACM0 AT+CRASH=panic
+   $ tools/at.py /dev/ttyACM0 AT+CRASH=panic
    crashing now (reconnect after reboot, then AT+DIAG)
    ```
 2. The board panics and **reboots** — note its USB port **renumbers** (see
    gotchas): `/dev/ttyACM0` came back as `/dev/ttyACM2`.
 3. Ask the rebooted board what happened:
    ```
-   $ python3 host/atcmd.py /dev/ttyACM2 AT+DIAG
+   $ tools/at.py /dev/ttyACM2 AT+DIAG
    boots=6 lastreset=PANIC (crash) ranbefore=34s uptime=25s \
      iram=325K miniram=319K coredump=YES (tools/coredump.sh)
    ```
@@ -55,7 +55,7 @@ radio driver stall).
 ## 1. Triage a real incident
 
 ```bash
-python3 host/atcmd.py /dev/ttyACMx AT+DIAG
+tools/at.py /dev/ttyACMx AT+DIAG
 ```
 Read `lastreset`:
 
@@ -68,7 +68,7 @@ Read `lastreset`:
 | `software (reflash/restart)` / `power-on` | normal | nothing |
 
 Also watch `iram`/`miniram` (internal SRAM, free / min-ever) over a few polls —
-a steadily falling `miniram` is a leak heading for a crash. `host/lora_status.py`
+a steadily falling `miniram` is a leak heading for a crash. `tools/lora_status.py`
 graphs these live.
 
 ---
@@ -128,7 +128,7 @@ with `xtensa-esp32s3-elf-addr2line -pfiaC -e firmware.elf <addrs>`.
   `+++` but died before `ATO`). Symptoms: `+++` no longer returns `OK`, data
   doesn't pass. Fix: send a clean `\r` then `ATO` (a leading CR clears any
   half-typed line), or just **wait 60 s** — AT mode now idle-times-out on its
-  own. `host/lora_status.py` self-heals this.
+  own. `tools/lora_status.py` self-heals this.
 - **A getty leaves the tty as `root:tty 0620`** (permission-denied for you) even
   after it's killed: `sudo chmod a+rw /dev/ttyACMx` or re-trigger udev.
 - **A hard hang / USB zombie may not be recoverable over USB** — no `AT`, no

@@ -43,17 +43,19 @@ jobs:
               echo "::error::boot_app0.bin not found under ~/.platformio/packages" >&2
               exit 1
             fi
-            # Version-stamped names so a downloaded file is unambiguous.
-            # .firmware.bin = the complete factory image (flash at 0x0; boots a
-            # blank chip). .app.bin = the app partition only (OTA / advanced).
+            # Board- AND version-stamped names so a download is unambiguous
+            # about which board it's for (parallels the L1's
+            # .wio_tracker_l1.uf2). .firmware.bin = the complete factory image
+            # (flash at 0x0; boots a blank chip). .app.bin = the app partition
+            # only (OTA / advanced).
             esptool.py --chip esp32s3 merge_bin \
-              -o "dist/lora-serial-${ver}.firmware.bin" \
+              -o "dist/lora-serial-${ver}.xiao_esp32s3.firmware.bin" \
               --flash_mode keep --flash_freq keep --flash_size keep \
               0x0 "$d/bootloader.bin" \
               0x8000 "$d/partitions.bin" \
               0xe000 "$BOOT_APP0" \
               0x10000 "$d/firmware.bin"
-            cp "$d/firmware.bin" "dist/lora-serial-${ver}.app.bin"
+            cp "$d/firmware.bin" "dist/lora-serial-${ver}.xiao_esp32s3.app.bin"
           done
           # Wio Tracker L1 (nRF52840 display node): build the wio_l1 env and wrap
           # its .hex into a .uf2 for the Adafruit UF2 bootloader (family
@@ -70,26 +72,34 @@ jobs:
           cat > RELEASE_BODY.md <<'EOF'
           ## Flashing (no toolchain needed)
 
-          Both boards run the **same firmware** and auto-elect their half-duplex
-          role from their chip MACs at boot — nothing per-board to configure. The
-          two boards flash **differently**, so grab the image for **your** board
-          below and verify it against `SHA256SUMS.txt`.
+          Each board runs the image **built for its chip** — they share the same
+          on-air protocol and auto-elect their half-duplex roles at boot, so any
+          pair works (two XIAOs, two L1s, or one of each). Every file below is
+          named for the board it targets — grab the one that matches **your**
+          board and verify it against `SHA256SUMS.txt`:
+
+          | Your board | Download this file | Flash it with |
+          |---|---|---|
+          | **XIAO ESP32-S3** | `lora-serial-__VERSION__.xiao_esp32s3.firmware.bin` | ESP web flasher / esptool at `0x0` |
+          | **Wio Tracker L1** (nRF52840 + OLED) | `lora-serial-__VERSION__.wio_tracker_l1.uf2` | double-click RST, drag the `.uf2` onto the drive |
 
           ### XIAO ESP32-S3 node
 
-          Download **`lora-serial-__VERSION__.firmware.bin`** — the complete factory
-          image (bootloader + partitions + app; boots a blank chip).
+          Download **`lora-serial-__VERSION__.xiao_esp32s3.firmware.bin`** — the
+          complete factory image (bootloader + partitions + app; boots a blank
+          chip).
 
           - **Easiest — web flasher:** open https://espressif.github.io/esptool-js/ ,
             connect the board, and flash it at offset **`0x0`**.
           - **Or esptool:**
             ```bash
-            esptool.py --chip esp32s3 write_flash 0x0 lora-serial-__VERSION__.firmware.bin
+            esptool.py --chip esp32s3 write_flash 0x0 lora-serial-__VERSION__.xiao_esp32s3.firmware.bin
             ```
 
           Flash the same file to each XIAO. (Also included:
-          **`lora-serial-__VERSION__.app.bin`** — the app partition only, for OTA or
-          re-flashing just the app; flash at `0x10000`, won't boot a blank chip.)
+          **`lora-serial-__VERSION__.xiao_esp32s3.app.bin`** — the app partition
+          only, for OTA or re-flashing just the app; flash at `0x10000`, won't
+          boot a blank chip.)
 
           ### Wio Tracker L1 display node
 

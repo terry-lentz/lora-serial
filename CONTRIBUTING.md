@@ -93,9 +93,9 @@ welcome).
   `Setup()`/`Loop()`, role discovery/pairing, the turn engine, recovery, ADR.
 - `src/main.cpp` — ~54 lines: defines the shared globals once, plus `setup()`/
   `loop()`, which just forward to the static-singleton `g_device`.
-- `host/` — host-side tools: `raw_verify.py` (byte-exact throughput check) and
-  `atcmd.py` (AT-command helper). No host daemon is required — the link is a plain
-  serial port, so OS `agetty` handles login directly.
+- `tools/` — host-side helpers (flashing, AT console, transfer/verify, live
+  status); see `tools/README.md`. No host daemon is required — the link is a
+  plain serial port, so OS `agetty` handles login directly.
 - `test/` — native unit/integration tests (Unity); see [docs/TESTING.md](./docs/TESTING.md).
 - `docs/` — design, security, throughput, testing, coding standards, research, and
   the radio primer.
@@ -112,7 +112,7 @@ New radio behavior should auto-derive its timing from `getTimeOnAir()` so it wor
 at any SF/BW.
 
 **Line length: 80 columns, hard.** Every line in our own source
-(`src/`, `lib/linklayer/`, `test/`, `host/`) is wrapped to **at most 80 columns**
+(`src/`, `lib/linklayer/`, `test/`, `tools/*.py`) is wrapped to **at most 80 cols**
 (display width — a multibyte UTF-8 char like `—` counts as one column). Keep it that
 way: it makes side-by-side diffs and small-terminal review painless. Wrap C/C++ at
 commas or before binary operators with the continuation indented to match; split long
@@ -129,7 +129,7 @@ import glob
 ours = (glob.glob('src/**/*.*', recursive=True)
       + glob.glob('lib/linklayer/**/*.*', recursive=True)
       + glob.glob('test/**/*.*', recursive=True)
-      + glob.glob('host/**/*.py', recursive=True))
+      + glob.glob('tools/*.py', recursive=True))
 for f in ours:
     for n, l in enumerate(open(f, encoding='utf-8'), 1):
         if len(l.rstrip('\n')) > 80:
@@ -145,5 +145,5 @@ reformat them and don't apply our 80-column rule to them.
 ## Reporting issues
 
 Include: the mode (`AT+MODE?`), `AT+LINK?` output (rssi/snr/pwr/counters), board +
-host OS, and steps to reproduce. For reliability issues, the `host/raw_verify.py`
+host OS, and steps to reproduce. For reliability issues, the `tools/raw_verify.py`
 byte-exact test output is gold.

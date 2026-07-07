@@ -93,11 +93,11 @@ AT command mode auto-exits after **60 s** of silence (`ATO` is no longer the onl
 way out), so a forgotten or crashed AT tool can't strand a board out of its data
 pipe.
 
-## Live status monitor — `host/lora_status.py`
+## Live status monitor — `tools/lora_status.py`
 Watch link/ADR state refresh on an interval (great for seeing ADR adapt as you
 move the boards, or watching RSSI/SNR/retransmits during a transfer):
 ```bash
-python3 host/lora_status.py /dev/ttyACM0 --interval 5
+tools/lora_status.py /dev/ttyACM0 --interval 5
 # 12:31:07  turbo auto  rssi=-56 snr=8 pwr=-6 txq=0 retx=4% heap=298K lastreset=...
 ```
 **Caveat:** there's a single shared radio channel and no out-of-band telemetry,

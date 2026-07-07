@@ -10,13 +10,15 @@ and a **Wio Tracker L1** that can show the stream on its OLED (see
 [Supported boards](#supported-boards)).
 
 > **Built with Claude (AI-assisted development)** — Claude Opus 4.8 for most of
-> it. This wasn't one-shot "vibe coding" — it took several iterations over days,
-> with a lot of direction: architecture, design decisions, coding standards,
-> testing and diagnostic approaches, and the UI, closely guided at each
-> step (the working rules are in [CLAUDE.md](./CLAUDE.md)). In practice it was
-> roughly a **10× throughput gain** — work that would have taken 2–3 days took
-> 2–3 hours. Truly remarkable what can be done. Is it 'perfection'? No — but the
-> tradeoff, I believe, is worth it.
+> it. This wasn't one-shot "vibe coding" — the initial project came together
+> over **~5 days** (through July 7, 2026), including the first Wio Tracker L1
+> display-node work, across many iterations with a lot of direction:
+> architecture, design decisions, coding standards, testing and diagnostic
+> approaches, and the UI, closely guided at each step (the working rules are in
+> [CLAUDE.md](./CLAUDE.md)). In practice it was roughly a **10× throughput
+> gain** — work that would have taken 2–3 days took 2–3 hours. Truly remarkable
+> what can be done. Is it 'perfection'? No — but the tradeoff, I believe, is
+> worth it.
 
 <table align="center">
 <tr>
@@ -65,7 +67,7 @@ file to the board:
 
 | Step | What to do |
 |---|---|
-| **1 · Download** | From the **[latest release](https://github.com/terry-lentz/lora-serial/releases/latest)**, grab the image **for each board's chip**: XIAO ESP32-S3 → **`lora-serial-<version>.firmware.bin`**; Wio Tracker L1 → **`lora-serial-<version>.wio_tracker_l1.uf2`**. |
+| **1 · Download** | From the **[latest release](https://github.com/terry-lentz/lora-serial/releases/latest)**, grab the image **named for your board's chip**: XIAO ESP32-S3 → **`lora-serial-<version>.xiao_esp32s3.firmware.bin`**; Wio Tracker L1 → **`lora-serial-<version>.wio_tracker_l1.uf2`**. |
 | **2 · Flash — XIAO ESP32-S3** | Open the **[ESP web flasher](https://espressif.github.io/esptool-js/)**, connect the board, and flash the `.bin` at offset `0x0`. |
 | **2 · Flash — Wio Tracker L1** | **Double-tap the RST button** — a `TRACKER L1` USB drive appears — then **copy the `.uf2`** onto it. No esptool, no toolchain. |
 | **3 · Power on** | Power both ends. They auto-pair and encrypt, then run on the reliable **`medium`** mode at full power; open a serial terminal (or watch the L1's screen) and start sending. |
@@ -99,8 +101,9 @@ unless you want to override a setting:
 > to experiment — the fixed-mode default is what we trust for everyday use.
 > Details in [CAPABILITIES_JOURNEY.md](./docs/CAPABILITIES_JOURNEY.md).
 
-(`firmware.bin` is the full image that boots a blank chip; the release also ships
-an `app.bin` for OTA — see the release notes.) **Prefer to build from source?**
+(The XIAO's `.firmware.bin` is the full image that boots a blank chip; the
+release also ships an `.app.bin` for OTA — see the release notes.) **Prefer to
+build from source?**
 See **[Build from source](#build-from-source)** below.
 
 ## What you get
@@ -620,13 +623,13 @@ boot re-pairs). The full crypto design is in [SECURITY.md](./docs/SECURITY.md).
 
 The mode is **saved in flash**, so you set it **once** and every later session — including
 `agetty` — just uses the port with **no AT traffic per session**. Use the helper
-(`host/atcmd.py`) which handles the `+++` escape timing for you. Do this on **both** boards:
+(`tools/at.py`) which handles the `+++` escape timing for you. Do this on **both** boards:
 
 ```bash
 # one-time: switch to turbo and persist it
-python3 host/atcmd.py /dev/ttyACM0 AT+MODE=turbo AT\&W
+tools/at.py /dev/ttyACM0 AT+MODE=turbo AT\&W
 # check it
-python3 host/atcmd.py /dev/ttyACM0 AT+MODE? AT+LINK?
+tools/at.py /dev/ttyACM0 AT+MODE? AT+LINK?
 ```
 
 After that, `sudo agetty -L 115200 ttyACM0 vt100` (or your terminal) just works at the
