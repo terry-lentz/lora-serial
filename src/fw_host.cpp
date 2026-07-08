@@ -149,7 +149,13 @@ void Host::Poll() {
     // Bulk-drain ALL waiting USB bytes into the big PSRAM ingest ring so the
     // core's small queue never overflows; then feed the link from the ring at
     // link rate.
-    while (Serial.available() && IngestFree() > kIngestLowFree) {
+    // keepall back-pressures the host once nearly full (stop reading USB so the
+    // driver's flow control stalls the writer -> byte-exact). keeplatest keeps
+    // draining USB regardless and lets the ring evict its oldest bytes, so a
+    // full buffer never blocks the writer -- it just loses the stale tail.
+    bool keepall = ingest_ring_.policy() == util::ByteRing::kKeepAll;
+    while (Serial.available() &&
+           (!keepall || ingest_ring_.free() > kIngestLowFree)) {
         platform::WatchdogFeed();   // a host flood can read a while; stay fed
         uint8_t raw[kBulkReadBytes];
         size_t want = Serial.available();
@@ -159,9 +165,9 @@ void Host::Poll() {
         if (rd <= 0) break;
         uint8_t filt[sizeof(raw) + kEscapePlusCount];
         size_t fn = AtFilter(raw, (size_t)rd, filt); // strip +++/AT bytes
-        size_t took = IngestPush(filt, fn);
-        // ring full (stream > ring) -> counted, not silent
-        if (took < fn) ingest_drop_ += (fn - took);
+        // Push applies the retention policy and returns how many bytes it had
+        // to drop (keepall: overflow past cap; keeplatest: oldest evicted).
+        ingest_drop_ += ingest_ring_.Push(filt, fn);
     }
     IngestToLink();
 }
@@ -246,6 +252,11 @@ void Host::LoadSettings() {
     cfg.freq_mhz = prefs.getFloat("freq", kFreqMhz);
     // private-link sync word (both ends must match)
     cfg.sync    = prefs.getUChar("sync", kSyncWord);
+    // Outbound-buffer retention: policy + keeplatest window (see AT+BUFMODE).
+    // Applied to the ring in IngestInit()/ApplyBufPolicy(), which runs after
+    // this so cfg is already populated.
+    cfg.bufmode = prefs.getUChar("bmode", kBufModeDefault);
+    cfg.bufkeep = prefs.getUInt("bkeep", kBufKeepDefault);
     // Static link key: the AT+TRAIN-derived per-pair key if we've paired, else
     // the built-in fallback. NVS survives reflash, so you pair once. The active
     // key (g_link_key) starts as a copy; the session handshake later replaces
@@ -273,6 +284,8 @@ void Host::SaveSettings() {
     prefs.putFloat("freq", cfg.freq_mhz);
     prefs.putUChar("sync", cfg.sync);
     prefs.putUChar("pwr", (uint8_t)g_radio.tx_power());   // configured TX power
+    prefs.putUChar("bmode", cfg.bufmode);   // outbound-buffer retention policy
+    prefs.putUInt("bkeep", cfg.bufkeep);    // keeplatest window (bytes)
 }
 
 void Host::KeyFingerprint(char* out, size_t n) {
@@ -362,8 +375,20 @@ void Host::Emit(const char* s) { AtReply(s); }
 
 void Host::IngestInit() {
     // Prefer a large PSRAM ring; fall back to internal RAM (see platform.h).
-    ingest_ = platform::AllocIngest(kIngestWantBytes, kIngestFallBytes,
-                                    &ingest_cap_);
+    size_t cap = 0;
+    uint8_t* storage =
+        platform::AllocIngest(kIngestWantBytes, kIngestFallBytes, &cap);
+    ingest_ring_.Init(storage, cap);
+    ApplyBufPolicy();   // honor the persisted retention policy (LoadSettings)
+}
+
+// Map the persisted retention settings onto the ring. Runtime-safe: changing
+// the policy only affects future pushes, never the bytes already queued.
+void Host::ApplyBufPolicy() {
+    util::ByteRing::Policy p = (cfg.bufmode == BUFMODE_KEEPLATEST)
+                                  ? util::ByteRing::kKeepLatest
+                                  : util::ByteRing::kKeepAll;
+    ingest_ring_.SetPolicy(p, cfg.bufkeep);
 }
 
 // Radio-wait idle-hook thunk: forwards to the singleton so host I/O is serviced
@@ -442,45 +467,28 @@ void Host::CheckHostReconnect() {
     was_conn = conn;
 }
 
-// ---- Large host->link INGEST ring (PSRAM-backed) ----------------------------
+// ---- Large host->link INGEST ring (the configurable send queue) -------------
 // The ESP32 Arduino USB-CDC core drains the USB FIFO into a small FreeRTOS
 // queue and SILENTLY DROPS when that queue is full (no USB NAK — a known
 // arduino-esp32 limitation, issues #10836/#5727). A fast `cat bigfile` (USB
 // runs ~1 MB/s, the "115200 baud" is cosmetic) overruns the ~2 KB/s LoRa link
 // and bytes vanish.
 // Fix: each poll, BULK-read everything waiting (bulk reads dodge the per-byte
-// lock contention) into a big PSRAM ring, then feed the link from it at link
-// rate. With a multi-MB ring every realistic transfer fits -> lossless, no
-// client-side flow control. Only a stream LARGER than the ring can still drop
-// (counted in ingest_drop_).
-size_t Host::IngestCount() {
-    return (in_head_ - in_tail_ + ingest_cap_) % ingest_cap_;
-}
-size_t Host::IngestFree() {
-    return ingest_cap_ ? ingest_cap_ - 1 - IngestCount() : 0;
-}
-// Push up to n bytes; returns accepted count (rest = overrun beyond the ring).
-size_t Host::IngestPush(const uint8_t* s, size_t n) {
-    size_t fr = IngestFree(); if (n > fr) n = fr;
-    size_t acc = 0;
-    while (acc < n) {
-        size_t contig = ingest_cap_ - in_head_;
-        size_t c = (n - acc) < contig ? (n - acc) : contig;
-        memcpy(ingest_ + in_head_, s + acc, c);
-        in_head_ = (in_head_ + c) % ingest_cap_; acc += c;
-    }
-    return acc;
-}
+// lock contention) into a big ring, then feed the link from it at link rate.
+// With a multi-MB ring every realistic transfer fits -> lossless. The ring's
+// retention policy (util::ByteRing, set by ApplyBufPolicy) governs overflow:
+// keepall counts the drop (and Poll's low-free guard back-pressures the host
+// first); keeplatest evicts the oldest queued bytes to stay within its window.
 // Feed the link from the ingest ring at whatever rate it accepts
-// (backpressure-safe).
+// (backpressure-safe): Peek the contiguous run, Write it, Drop what was taken.
 void Host::IngestToLink() {
-    while (IngestCount() > 0) {
+    while (ingest_ring_.count() > 0) {
         platform::WatchdogFeed();   // draining a large backlog; stay fed
-        size_t contig = (in_head_ >= in_tail_) ? (in_head_ - in_tail_)
-                                             : (ingest_cap_ - in_tail_);
-        size_t w = g_link.Write(ingest_ + in_tail_, contig);
-        in_tail_ = (in_tail_ + w) % ingest_cap_; host_in_ += w;
-        if (w < contig) break;            // link ring full -> stop (buffered)
+        size_t run;
+        const uint8_t* p = ingest_ring_.Peek(&run);
+        size_t w = g_link.Write(p, run);
+        ingest_ring_.Drop(w); host_in_ += w;
+        if (w < run) break;               // link ring full -> stop (buffered)
     }
 }
 
@@ -586,7 +594,8 @@ void Host::AtExec(char* line) {
                  "OK\r\n",
                  (double)g_radio.rssi(), g_radio.snr(), g_radio.tx_power(),
                  (unsigned)g_link.TxPending(), (unsigned long)host_in_,
-                 (unsigned long)host_out_, (unsigned)(ingest_cap_/1024),
+                 (unsigned long)host_out_,
+                 (unsigned)(ingest_ring_.capacity() / 1024),
                  (unsigned long)ingest_drop_,
                  (unsigned long)g_link.DbgStatTx(),
                  (unsigned long)g_link.DbgStatRetx(),
@@ -858,8 +867,45 @@ void Host::AtExec(char* line) {
         cfg.sync = (uint8_t)v; g_radio.SetSyncWord(cfg.sync);
         AtReply("OK (set on BOTH ends)\r\n");
     }
+    // AT+BUFMODE? — show the outbound send-queue retention policy. Read-only.
+    else if (!strcmp(line, "AT+BUFMODE?")) {
+        snprintf(s, sizeof s, "bufmode=%s\r\nOK\r\n",
+                 cfg.bufmode == BUFMODE_KEEPLATEST ? "keeplatest" : "keepall");
+        AtReply(s);
+    }
+    // AT+BUFMODE=keepall|keeplatest — set the send-queue retention policy.
+    // keepall (default): byte-exact; a full buffer back-pressures the host so
+    // no byte is lost. keeplatest: drop the OLDEST queued bytes to retain only
+    // the freshest AT+BUFKEEP window, so a slow/absent peer never stalls the
+    // writer and catch-up stays bounded. Applied at once (future pushes only);
+    // this end only -- each board is configured independently. AT&W to persist.
+    else if (!strcmp(line, "AT+BUFMODE=keepall") ||
+             !strcmp(line, "AT+BUFMODE=keeplatest")) {
+        cfg.bufmode = !strcmp(line, "AT+BUFMODE=keeplatest")
+                          ? BUFMODE_KEEPLATEST : BUFMODE_KEEPALL;
+        ApplyBufPolicy();
+        AtReply("OK\r\n");
+    }
+    // AT+BUFKEEP? — show the keeplatest retained window in bytes. Read-only.
+    else if (!strcmp(line, "AT+BUFKEEP?")) {
+        snprintf(s, sizeof s, "bufkeep=%lu\r\nOK\r\n",
+                 (unsigned long)cfg.bufkeep);
+        AtReply(s);
+    }
+    // AT+BUFKEEP=<bytes> — set the keeplatest window (last N bytes kept when
+    // the buffer can't drain). The ring clamps it to its usable capacity. No
+    // effect under keepall. Not persisted until AT&W.
+    else if (sscanf(line, "AT+BUFKEEP=%d", &v) == 1) {
+        if (v < 0) {
+            AtReply("ERROR bufkeep must be >= 0\r\n");
+        } else {
+            cfg.bufkeep = (uint32_t)v; ApplyBufPolicy();
+            AtReply("OK\r\n");
+        }
+    }
     // AT&W — write the current settings to NVS so they survive reboot/reflash.
-    // Persists addr/peer/feat/name/mode/freq/sync (not the live TX power).
+    // Persists addr/peer/feat/name/mode/freq/sync/bufmode/bufkeep (not the live
+    // TX power).
     else if (!strcmp(line, "AT&W")) {
         SaveSettings(); AtReply("OK\r\n");
     }
@@ -915,6 +961,8 @@ void Host::AtExec(char* line) {
                 "AT+SYNC=0xNN AT+SYNC?\r\n");
         AtReply(" AT+PWR=dBm AT+APWR=0|1 AT+ENC=0|1 AT+COMP=0|1 "
                 "AT+ADRGFSK=0|1 AT+FS=0|1\r\n");
+        AtReply(" AT+BUFMODE=keepall|keeplatest AT+BUFMODE? "
+                "AT+BUFKEEP=<bytes> AT+BUFKEEP?\r\n");
         AtReply(" AT+SPEEDTEST=<kb>(initiator) AT+SINK=0|1(peer) "
                 "AT+TRAIN(pair) AT+PAIR(proximity)\r\n");
         AtReply(" AT&W(save) AT&F(factory-reset) ATO(exit)\r\nOK\r\n");

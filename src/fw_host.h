@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "byte_ring.h"  // util::ByteRing — the per-device outbound send queue
 #include "fw_config.h"
 #include "prng.h"   // link_layer::Lcg — deterministic speed-test PRNG (member)
 
@@ -67,6 +68,16 @@ class Host {
    * on address/encryption/compression changes, and on host reconnect.
    */
   void ApplyLinkConfig();
+
+  /**
+   * @brief Apply cfg.bufmode / cfg.bufkeep to the outbound send queue.
+   *
+   * Maps the persisted policy (BUFMODE_KEEPALL / BUFMODE_KEEPLATEST) and window
+   * onto the ingest ring. Called from IngestInit() at boot and whenever
+   * AT+BUFMODE / AT+BUFKEEP or the L1 CONFIG menu change the policy at runtime;
+   * the change affects only future pushes, never bytes already queued.
+   */
+  void ApplyBufPolicy();
 
   /**
    * @brief Push ONLY the per-mode timing (BDP window + retransmit_ms) into the
@@ -250,27 +261,7 @@ class Host {
    */
   void CheckHostReconnect();
 
-  // ---- Large host->link INGEST ring (PSRAM-backed) helpers ------------------
-  /**
-   * @brief Bytes currently queued in the ingest ring.
-   * @return the queued byte count.
-   */
-  size_t IngestCount();
-
-  /**
-   * @brief Free space in the ingest ring.
-   * @return the free byte count (0 if the ring isn't allocated yet).
-   */
-  size_t IngestFree();
-
-  /**
-   * @brief Push bytes into the ingest ring, accepting as many as fit.
-   * @param[in] s  source bytes. Must not be null.
-   * @param[in] n  bytes offered.
-   * @return the accepted count (the remainder is overrun beyond the ring).
-   */
-  size_t IngestPush(const uint8_t* s, size_t n);
-
+  // ---- Large host->link INGEST ring (the configurable send queue) -----------
   /**
    * @brief Feed the link from the ingest ring at whatever rate it accepts
    *        (backpressure-safe).
@@ -356,14 +347,14 @@ class Host {
   // queue and SILENTLY DROPS when that queue is full (arduino-esp32
   // #10836/#5727). A fast `cat bigfile` overruns the ~2 KB/s LoRa link and
   // bytes vanish. Fix: each poll, BULK-read everything waiting into this big
-  // PSRAM ring, then feed the link from it at link rate. With a multi-MB ring
-  // every realistic transfer fits -> lossless. Only a stream LARGER than the
-  // ring can still drop (counted in ingest_drop_).
-  uint8_t* ingest_ = nullptr;     ///< ring storage (ps_malloc'd in IngestInit)
-  size_t   ingest_cap_ = 0;       ///< ring capacity (bytes); 0 until allocated
-  size_t   in_head_ = 0;          ///< producer index (IngestPush)
-  size_t   in_tail_ = 0;          ///< consumer index (IngestToLink)
-  uint32_t ingest_drop_ = 0;      ///< bytes dropped (stream > ring); AT+LINK?
+  // ring (PSRAM where present), then feed the link from it at link rate. With a
+  // multi-MB ring every realistic transfer fits -> lossless. This is also the
+  // configurable per-device send queue: its retention policy (AT+BUFMODE,
+  // ApplyBufPolicy()) decides overflow behavior when the peer can't keep up —
+  // byte-exact back-pressure (keepall) or drop-oldest (keeplatest). Storage is
+  // claimed once in IngestInit() and never freed (CLAUDE.md rule 5).
+  util::ByteRing ingest_ring_;    ///< the outbound send queue (storage below)
+  uint32_t ingest_drop_ = 0;      ///< bytes dropped (overflow/evict); AT+LINK?
 
   // ---- AT command mode (Hayes "+++" escape) for the raw serial transport ---
   bool     at_mode_ = false;      ///< true while in AT command mode

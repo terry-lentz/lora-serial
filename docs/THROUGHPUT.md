@@ -104,10 +104,14 @@ fastest the link goes. (turbo ≈ a 56K modem, medium ≈ 28.8K, slow ≈ 2400 b
 ```
 
 ❶ **host → board (USB host→device): absorbed, not the wall.** USB delivers far
-faster than the link (~1 MB/s). The board absorbs the burst into a **2 MB PSRAM
-ingest ring** and drains it into the radio at link speed; when the ring fills, the
-USB stack NAKs (real back-pressure) so nothing is dropped. This used to be the
-hard ceiling on the old Hardware-USB/JTAG path; it no longer is.
+faster than the link (~1 MB/s). The board absorbs the burst into the **ingest
+ring** (2 MB PSRAM on the XIAO, 48 KB SRAM on the L1) and drains it into the
+radio at link speed. By default (the `keepall` policy) a full ring makes the USB
+stack NAK (real back-pressure), so a flow-control-respecting host is throttled,
+not dropped; a host that floods past that has its *newest* bytes dropped and
+**counted** in `idrop`, never silently. This used to be the hard ceiling on the
+old Hardware-USB/JTAG path; it no longer is. See **Buffering & backlog** below
+for the selectable retention policy and the overnight-backlog caveat.
 
 ❷ **board → board (radio): half-duplex turn-taking + ARQ — the real limit.** One
 radio can't transmit and receive at once, so the two ends take turns. A
@@ -118,6 +122,76 @@ set by **airtime** (SF/BW/CR) plus turn-around overhead, *not* by USB.
 
 ❸ **board → host (USB device→host): not a bottleneck.** A non-blocking ring drains
 as fast as the terminal reads.
+
+### Buffering & backlog — the send queue and its retention policy
+
+Each board has **one configurable buffer**: the **ingest ring (❶)**, the queue
+of host bytes waiting to go out over the radio. (The link→host side (❸) is a
+small fixed staging ring, not a place a backlog builds — a slow *reader* is
+back-pressured by the transport, never buffered for hours.) The ring is where a
+backlog piles up when the peer is slow or absent, and its size is the hard cap
+on how much unsent data a board holds. At `far`'s ~15 B/s a *full* ring is a
+long time to drain:
+
+| Board | Ingest ring | Full-ring drain at `far` (~15 B/s raw) |
+|---|---|---|
+| XIAO ESP32-S3 | **2 MB** (PSRAM) | **~39 h** (~15 h on compressible data) |
+| Wio Tracker L1 | **48 KB** (SRAM) | **~55 min** (~20 min on compressible data) |
+
+`ibuf=` / `idrop=` in `AT+LINK?` report the ring size and any dropped bytes.
+
+**Two retention policies** decide what happens when the queue can't drain fast
+enough. Each board is configured **independently** (`AT+BUFMODE`), so a
+byte-exact sender can talk to a freshness-first receiver:
+
+```
+                   ingest ring: oldest ───────────────▶ newest ─▶ radio
+
+ keepall  (default)   ████████████████████████████████  FULL
+   byte-exact         host write ──✋ back-pressured (USB-CDC NAKs the writer)
+                      nothing queued is dropped; the writer waits for room.
+                      a non-flow-controlled flood loses its NEWEST bytes
+                      (counted in idrop). delivery stays complete + in-order.
+
+ keeplatest           ░░░░░░░░░░░░░░░░████████  keep last N
+   freshness-first    evict oldest ◀─┘        └─▶ host write always accepts
+                      the OLDEST queued bytes are discarded so only the most
+                      recent AT+BUFKEEP bytes remain. bounds catch-up; the
+                      writer never stalls; NOT byte-exact.
+```
+
+- **`keepall`** (default) — **byte-exact, in-order.** A full buffer
+  back-pressures the USB port (the CDC stack NAKs), so a flow-control-respecting
+  host is throttled and nothing is lost; a host that overruns past that has its
+  **newest** bytes dropped and **counted** in `idrop`, never silently. The
+  **oldest** buffered bytes are always preserved. This is the right default for
+  a transparent serial *cable* — the TCP send-buffer (`SO_SNDBUF`) / DDS
+  `HISTORY = KEEP_ALL` model.
+- **`keeplatest`** — **freshness-first.** The buffer never back-pressures the
+  writer; instead it discards the **oldest** queued bytes so only the most
+  recent `AT+BUFKEEP=<bytes>` remain (default 8 KB). Catch-up after a
+  disconnect is bounded to that window instead of the whole ring. This is the
+  right choice for **telemetry or a display node**, where the latest reading
+  matters more than a complete history — the DDS `HISTORY = KEEP_LAST`, depth N
+  model.
+
+The trade-off to know: under **keepall**, a long disconnect (say, overnight)
+means the receiver replays the **old** backlog first and may not see current
+data for hours — up to the drain times above. **keeplatest** trades the
+byte-exact guarantee for a bounded, always-current view.
+
+Configure it over AT or, on the L1, from the CONFIG menu (`Buffer` =
+KeepAll/KeepLast, `Keep` = window in KiB):
+
+| Command | Effect |
+|---|---|
+| `AT+BUFMODE?` | show the policy (`keepall` / `keeplatest`) |
+| `AT+BUFMODE=keepall` | byte-exact; back-pressure a full buffer (default) |
+| `AT+BUFMODE=keeplatest` | drop oldest; keep only the freshest window |
+| `AT+BUFKEEP?` | show the keeplatest window in bytes |
+| `AT+BUFKEEP=<bytes>` | set the keeplatest window (default 8192) |
+
+Both settings persist with `AT&W`.
 
 ---
 

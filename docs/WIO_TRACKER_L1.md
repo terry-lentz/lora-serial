@@ -75,7 +75,7 @@ match), and the device name.
 
 **CONFIG** — an editable settings menu (scroll with up/down): Brightness, Region,
 Frequency, Mode, TX power, Auto-power, Encryption, Compression, Forward-secrecy,
-ADR-GFSK.
+ADR-GFSK, **Buffer** (send-queue retention), **Keep** (keeplatest window).
 - **Trackball up/down**: move the selection (the list scrolls; a scrollbar shows
   the position).
 - **Press**: enter edit (the value is bracketed with `◄ ►`); **left/right**
@@ -88,6 +88,12 @@ ADR-GFSK.
   while editing them). **Region** (TW/US/EU) sets the frequency range and snaps
   the carrier into the new band. TX power and auto-power are local radio
   settings.
+- **Buffer** picks the outbound send-queue retention policy: `KeepAll` (the
+  default — byte-exact; a full buffer back-pressures the host) or `KeepLast`
+  (freshness-first — drop the oldest queued bytes, keep only the most recent
+  **Keep** KiB). This is a **local** setting; each board is configured on its
+  own. See [THROUGHPUT.md](./THROUGHPUT.md#buffering--backlog--the-send-queue-and-its-retention-policy)
+  for the full model and the `AT+BUFMODE` / `AT+BUFKEEP` equivalents.
 
 Brightness has three steps (FULL / MED / LOW); LOW drops to the contrast floor
 plus a shortened pre-charge period for a genuinely dim night level.

@@ -210,7 +210,9 @@ rule. Each owns its former free-floating globals as private members:
   `turn_rx_ms()`, `retransmit_ms()`, `listen_ms()`, `window()`, `tx_power()`,
   `phy_fsk()`, `rssi()`).
 - **`Host` (`g_host`, `fw_host.{h,cpp}`)** — the transparent USB↔link data
-  plane: the non-blocking host-TX ring, the PSRAM ingest ring, the `+++` AT
+  plane: the non-blocking host-TX ring, the outbound ingest ring (a
+  `util::ByteRing` with a selectable retention policy — `keepall` back-pressure
+  vs `keeplatest` drop-oldest, `AT+BUFMODE`/`ApplyBufPolicy`), the `+++` AT
   command parser (`AT+SPEEDTEST`/`SINK`, X25519 `AT+TRAIN` pairing, auto-power),
   and **all NVS persistence** (`LoadSettings`/`SaveSettings`, frame-counter
   checkpoint `PersistTxCtr`).

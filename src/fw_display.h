@@ -66,6 +66,8 @@ class Display {
     kItemComp,     ///< compression on/off
     kItemFS,       ///< forward secrecy (FEAT_FS) on/off
     kItemGfsk,     ///< ADR may use the GFSK rung (FEAT_GFSK) on/off
+    kItemBufMode,  ///< send-queue retention policy (keepall / keeplatest)
+    kItemBufKeep,  ///< keeplatest retained window (KiB)
     kItemCount     ///< number of items (not an item)
   };
 

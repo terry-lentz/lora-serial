@@ -69,6 +69,12 @@ inline float BwFromCode(uint8_t code) {
  */
 #define FEAT_APWR 0x40
 
+// Outbound-buffer retention policy (AT+BUFMODE / cfg.bufmode). Selects what the
+// single per-device send queue does when it can't drain fast enough. See
+// util::ByteRing and docs/THROUGHPUT.md.
+#define BUFMODE_KEEPALL    0   ///< byte-exact: keep oldest, back-pressure new
+#define BUFMODE_KEEPLATEST 1   ///< fresh: keep last bufkeep bytes, drop oldest
+
 /**
  * @brief Built-in fallback key (used only until the pair is "trained" via
  *        AT+TRAIN, which derives a unique key over X25519 ECDH and stores it in
@@ -172,6 +178,14 @@ static const uint16_t kPreamble     = 8;     ///< min-ish; shaves airtime/frame
 static const float    kTcxoV       = 1.8f;   ///< Wio-SX1262 TCXO on SX1262 DIO3
 /// configured MAX TX power (dBm); legal in TW (920-925: 27 dBm EIRP outdoor)
 static const int8_t   kTxPowerDbm = 22;
+/// Default outbound-buffer retention policy: byte-exact (lose nothing), the
+/// right default for a transparent serial cable. Switch to keeplatest only
+/// when freshness matters more than completeness (see AT+BUFMODE).
+static const uint8_t  kBufModeDefault = BUFMODE_KEEPALL;
+/// Default keeplatest window (bytes) — the last N bytes kept when a keeplatest
+/// buffer can't drain. Unused under keepall. 8 KB: a screenful-plus of text,
+/// small enough to catch up quickly on the slow far modes (see AT+BUFKEEP).
+static const uint32_t kBufKeepDefault = 8192;
 /// No valid RX for this long (ms) => the link is silent. Auto-power then ramps
 /// our own TX power UP (fw_host) and reports "no signal" to the peer so it
 /// boosts too (fw_device) -- the two halves that re-establish a starved link
@@ -240,6 +254,8 @@ struct ModemSettings {
     uint8_t cr;       ///< LoRa coding-rate denominator (runtime, NVS)
     float freq_mhz;   ///< carrier frequency in MHz (NVS)
     uint8_t sync;     ///< private-link sync word (NVS)
+    uint8_t  bufmode; ///< outbound-buffer retention: BUFMODE_* (NVS)
+    uint32_t bufkeep; ///< keeplatest window in bytes (NVS)
 };
 
 /**

@@ -188,12 +188,10 @@ supports**. Two boards are first-class, built from the *same* `src/` firmware
 behind a small platform layer (`src/platform/`), so both ends always speak an
 identical protocol:
 
-- **XIAO ESP32-S3 + Wio-SX1262** — the primary node, and what most of this README
-  describes. A headless USB serial port; flash the `node_raw` image to both ends.
-- **Seeed Wio Tracker L1** (nRF52840 + SX1262 + 1.3″ OLED) — a **receive-and-
-  display node**: besides being a serial port it renders the received stream on
-  its screen and adds an on-device menu. Flash the `wio_l1` image. Full
-  build/flash/port details: **[docs/WIO_TRACKER_L1.md](./docs/WIO_TRACKER_L1.md)**.
+| Board | What it is | Where to buy (Seeed Studio) | Docs |
+|---|---|---|---|
+| **XIAO ESP32-S3 + Wio-SX1262** | The primary node (most of this README) — a headless USB serial port; flash `node_raw` to both ends. | [XIAO ESP32-S3](https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html) + Wio-SX1262 LoRa module | [Seeed kit wiki](https://wiki.seeedstudio.com/wio_sx1262_with_xiao_esp32s3_kit/) |
+| **Seeed Wio Tracker L1**<br/>(nRF52840 + SX1262 + 1.3″ OLED) | A **receive-and-display node** — a serial port that also renders the stream on its screen, with an on-device menu; flash `wio_l1`. | [Wio Tracker L1](https://www.seeedstudio.com/Wio-Tracker-L1-p-6453.html) | [Seeed wiki](https://wiki.seeedstudio.com/wio_tracker_l1_node/) · [our port notes](./docs/WIO_TRACKER_L1.md) |
 
 <table align="center">
 <tr><td align="center"><img src="docs/img/xiao_window.jpg" width="440" alt="A XIAO ESP32-S3 node in a 3D-printed case with a whip antenna, mounted on a window overlooking Taipei"></td></tr>
@@ -559,7 +557,7 @@ Like a Hayes dial-up modem, the transparent serial build (`*_raw`) understands a
    | `AT` | `OK` (link check) |
    | `ATI` | identity: name, address, peer, initiator role, and `fw=` firmware version |
    | `AT+VER` | firmware version (`fw=…`), stamped from the git tag at build time (`v0.1.2`, or `v0.1.2-3-gabc1234` on a dev build) |
-   | `AT+LINK?` | live link state — `rssi`, `snr`, `pwr` (TX dBm), `txq` (queued), `hin`/`hout` (host bytes in/out), `ibuf` (ingest ring KB), `idrop` (overrun bytes), `tx`/`retx` (frames sent/resent), `heap` (free internal SRAM) |
+   | `AT+LINK?` | live link state — `rssi`, `snr`, `pwr` (TX dBm), `txq` (queued), `hin`/`hout` (host bytes in/out), `ibuf` (ingest ring KB), `idrop` (bytes dropped — overrun under `keepall`, evicted-oldest under `keeplatest`), `tx`/`retx` (frames sent/resent), `heap` (free internal SRAM) |
    | `AT+SESSION?` | forward-secrecy status — `session` (1 = a per-session key is active), and a 2-byte fingerprint of the `static` vs `active` key (they differ once the handshake completes). |
    | `AT+DIAG` | crash & health report — boots, **why it last reset** (panic/brownout/watchdog/clean), uptime before that reset, free/min internal SRAM, core-dump presence. See [DIAGNOSTICS.md](./docs/DIAGNOSTICS.md). |
    | `AT+CRASH=<panic\|hang>` | **deliberately crash this board** (recoverable) to verify the diagnostics catch it — `panic` → core dump + `lastreset=PANIC`; `hang` → software-watchdog reboot. See [DEBUGGING.md](./docs/DEBUGGING.md). |
@@ -575,6 +573,8 @@ Like a Hayes dial-up modem, the transparent serial build (`*_raw`) understands a
    | `AT+SYNC=0xNN` / `AT+SYNC?` | set/show the private-link sync word. **Both ends must match.** |
    | `AT+ENC=0\|1` / `AT+COMP=0\|1` | toggle encryption / compression |
    | `AT+FS=0\|1` / `AT+FS?` | toggle **forward secrecy** (per-session ephemeral-key handshake). **Experimental, off by default** — see [SECURITY.md](./docs/SECURITY.md). |
+   | `AT+BUFMODE=keepall\|keeplatest` / `AT+BUFMODE?` | outbound send-queue retention. `keepall` (default) is **byte-exact** — a full buffer back-pressures the host, nothing queued is lost. `keeplatest` is **freshness-first** — it drops the **oldest** queued bytes to keep only the most recent `AT+BUFKEEP` window, so a slow/absent peer never stalls the writer (good for telemetry/display; not byte-exact). Configured **per board**. See [THROUGHPUT.md](./docs/THROUGHPUT.md#buffering--backlog--the-send-queue-and-its-retention-policy). |
+   | `AT+BUFKEEP=<bytes>` / `AT+BUFKEEP?` | the `keeplatest` retained window in bytes (default `8192`); ignored under `keepall`. |
    | `AT+TRAIN` | **secure pairing**: run on *both* ends (same mode) — they agree on a unique key over X25519 ECDH (no secret sent over the air) and print a fingerprint that must match. Stored in NVS, survives reflash. Replaces the built-in key. |
    | `AT+KEY?` | a short one-way **fingerprint** of the paired encryption key (8 hex chars). The same on two units iff their keys match, so you can confirm a pair agrees **without exposing the key**; changes after `AT+TRAIN`. (Also shown on the L1's INFO screen.) |
    | `AT+PAIR` | **proximity re-pair**: bring the two boards close and run on *both* — they re-discover at low power, re-elect roles, and re-train a fresh key. Same result as `AT+TRAIN` plus role election. See "Pairing & keys" above. |
@@ -868,7 +868,8 @@ edit the same settings.
 ### Config console (runtime settings)
 
 Runtime config is the AT/`+++` command mode described above (`AT+MODE`, `AT+ADDR`,
-`AT+PEER`, `AT+NAME`, `AT+FREQ`, `AT+SYNC`, `AT+PWR`, `AT+ENC`, `AT+COMP`; `AT&W` to
+`AT+PEER`, `AT+NAME`, `AT+FREQ`, `AT+SYNC`, `AT+PWR`, `AT+ENC`, `AT+COMP`,
+`AT+BUFMODE`, `AT+BUFKEEP`; `AT&W` to
 persist, `AT&F` to factory-reset, `AT?` for the full list). Settings persist in NVS,
 so they **survive reboot and reflash** — set identity/mode once without reflashing.
 

@@ -164,6 +164,13 @@ static const float   kFreqStepMhz = 0.1f;   ///< frequency edit step per click
 static const int kPwrMinDbm = -9;
 static const int kPwrMaxDbm = 22;
 
+// "keeplatest" retained-window edit range, in KiB. The item edits/displays
+// whole KiB; ConfirmEdit stores cfg.bufkeep in bytes. The ring clamps to its
+// real capacity, so a value above the device's buffer is harmless (the L1's
+// ingest ring is smaller than the XIAO's PSRAM ring).
+static const int kBufKeepMinKb = 1;    ///< 1 KiB floor
+static const int kBufKeepMaxKb = 64;   ///< 64 KiB ceiling (menu cap)
+
 // CONFIG/INFO rows: below the bar's 1-px gap (kBarH), 9 px apart, 8 px tall.
 // Six fill the 64-px panel exactly (11..63) with no empty strip; longer lists
 // scroll a window this tall to follow the cursor.
@@ -398,6 +405,18 @@ void Display::EnterEdit() {
         break;
       }
       case kItemPower:  draft_i_ = g_radio.tx_power(); break;
+      case kItemBufMode:
+        draft_i_ = (cfg.bufmode == BUFMODE_KEEPLATEST) ? 1 : 0;
+        break;
+      case kItemBufKeep: {
+        // Edit in whole KiB, clamped to the menu range (a value set larger via
+        // AT is pulled into range for editing; the ring clamps the rest).
+        int kb = (int)(cfg.bufkeep / 1024);
+        if (kb < kBufKeepMinKb) kb = kBufKeepMinKb;
+        if (kb > kBufKeepMaxKb) kb = kBufKeepMaxKb;
+        draft_i_ = kb;
+        break;
+      }
     }
   }
   editing_ = true;
@@ -440,6 +459,16 @@ void Display::EditStep(int dir) {
       draft_i_ = v;
       break;
     }
+    case kItemBufMode:            // two policies: a step just toggles
+      draft_i_ = !draft_i_;
+      break;
+    case kItemBufKeep: {
+      int v = draft_i_ + dir;
+      if (v < kBufKeepMinKb) v = kBufKeepMinKb;
+      if (v > kBufKeepMaxKb) v = kBufKeepMaxKb;
+      draft_i_ = v;
+      break;
+    }
   }
 }
 
@@ -475,6 +504,8 @@ void Display::ConfirmEdit() {
       break;
     case kItemMode:
     case kItemPower:
+    case kItemBufMode:
+    case kItemBufKeep:
       apply_ival_ = draft_i_;
       break;
   }
@@ -554,6 +585,16 @@ void Display::ServiceConfig() {
       g_radio.SetTxPower((int8_t)apply_ival_);
       g_host.SaveSettings();
       break;
+    case kItemBufMode:
+      cfg.bufmode = apply_ival_ ? BUFMODE_KEEPLATEST : BUFMODE_KEEPALL;
+      g_host.ApplyBufPolicy();   // takes effect on the next push
+      g_host.SaveSettings();
+      break;
+    case kItemBufKeep:
+      cfg.bufkeep = (uint32_t)apply_ival_ * 1024;   // KiB -> bytes
+      g_host.ApplyBufPolicy();
+      g_host.SaveSettings();
+      break;
   }
 }
 
@@ -579,11 +620,13 @@ const Display::FeatToggle* Display::FeatFor(uint8_t item) {
 const char* Display::ItemLabel(uint8_t i) {
   if (const FeatToggle* ft = FeatFor(i)) return ft->label;
   switch (i) {
-    case kItemBright: return "Bright";
-    case kItemRegion: return "Region";
-    case kItemFreq:   return "Freq";
-    case kItemMode:   return "Mode";
-    case kItemPower:  return "Power";
+    case kItemBright:  return "Bright";
+    case kItemRegion:  return "Region";
+    case kItemFreq:    return "Freq";
+    case kItemMode:    return "Mode";
+    case kItemPower:   return "Power";
+    case kItemBufMode: return "Buffer";
+    case kItemBufKeep: return "Keep";
   }
   return "";
 }
@@ -624,6 +667,17 @@ void Display::ItemValue(uint8_t i, char* out, size_t n) {
       break;
     case kItemPower:
       snprintf(out, n, "%ddB", ed ? draft_i_ : g_radio.tx_power());
+      break;
+    case kItemBufMode: {
+      bool latest = ed ? (draft_i_ != 0)
+                       : (cfg.bufmode == BUFMODE_KEEPLATEST);
+      snprintf(out, n, "%s", latest ? "KeepLast" : "KeepAll");
+      break;
+    }
+    case kItemBufKeep:
+      // Whole KiB. When not editing, show the true persisted value even if it
+      // exceeds the menu cap (e.g. a larger window set via AT+BUFKEEP).
+      snprintf(out, n, "%dK", ed ? draft_i_ : (int)(cfg.bufkeep / 1024));
       break;
     default:
       if (n) out[0] = 0;

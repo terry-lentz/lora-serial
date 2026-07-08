@@ -21,6 +21,7 @@
 #include "frame_ring.h"   // SPSC frame ring for interrupt-driven RX
 #include "prng.h"         // link_layer::Lcg — deterministic loss PRNG
 #include "identity.h"     // link_layer::ElectInitiator — MAC role election
+#include "byte_ring.h"    // util::ByteRing — the configurable outbound buffer
 #include <cstring>
 
 /// 16-byte AEAD key shared by both ends of the simulated link.
@@ -1608,8 +1609,95 @@ void tearDown() {}
  *
  * @return Unity's aggregate pass/fail status code.
  */
+// ---- util::ByteRing — the configurable outbound buffer (AT+BUFMODE) --------
+
+// keepall: writes what fits, drops (counts) the *newest* overflow, and always
+// keeps the *oldest* bytes in order — byte-exact.
+static void test_byte_ring_keepall() {
+    uint8_t buf[16];
+    util::ByteRing r;
+    r.Init(buf, sizeof buf);
+    r.SetPolicy(util::ByteRing::kKeepAll, 0);
+    TEST_ASSERT_EQUAL_UINT(15, r.free());              // usable = cap-1
+
+    uint8_t a[10]; for (int i = 0; i < 10; i++) a[i] = (uint8_t)i;
+    TEST_ASSERT_EQUAL_UINT(0, r.Push(a, 10));          // all fit
+    TEST_ASSERT_EQUAL_UINT(10, r.count());
+
+    uint8_t b[10]; for (int i = 0; i < 10; i++) b[i] = (uint8_t)(100 + i);
+    TEST_ASSERT_EQUAL_UINT(5, r.Push(b, 10));          // 5 fit -> 5 dropped
+    TEST_ASSERT_EQUAL_UINT(15, r.count());             // full
+
+    uint8_t out[15];
+    TEST_ASSERT_EQUAL_UINT(15, r.Read(out, 15));
+    for (int i = 0; i < 10; i++) TEST_ASSERT_EQUAL_UINT8(i, out[i]);
+    for (int i = 0; i < 5; i++)  TEST_ASSERT_EQUAL_UINT8(100 + i, out[10 + i]);
+}
+
+// keeplatest: always accepts, evicts the *oldest* to stay within the keep
+// window, and keeps the *newest* bytes in order.
+static void test_byte_ring_keeplatest() {
+    uint8_t buf[64];
+    util::ByteRing r;
+    r.Init(buf, sizeof buf);
+    r.SetPolicy(util::ByteRing::kKeepLatest, 8);       // keep last 8
+
+    uint8_t a[5] = {0, 1, 2, 3, 4};
+    TEST_ASSERT_EQUAL_UINT(0, r.Push(a, 5));
+    uint8_t b[6] = {5, 6, 7, 8, 9, 10};
+    TEST_ASSERT_EQUAL_UINT(3, r.Push(b, 6));           // 11>8 -> evict 3
+    TEST_ASSERT_EQUAL_UINT(8, r.count());              // bounded to keep
+
+    uint8_t out[8], exp[8] = {3, 4, 5, 6, 7, 8, 9, 10};
+    TEST_ASSERT_EQUAL_UINT(8, r.Read(out, 8));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(exp, out, 8);
+}
+
+// keeplatest: a single push bigger than the window keeps only its last `keep`.
+static void test_byte_ring_keeplatest_big_push() {
+    uint8_t buf[64];
+    util::ByteRing r;
+    r.Init(buf, sizeof buf);
+    r.SetPolicy(util::ByteRing::kKeepLatest, 4);
+
+    uint8_t a[10]; for (int i = 0; i < 10; i++) a[i] = (uint8_t)i;
+    TEST_ASSERT_EQUAL_UINT(6, r.Push(a, 10));          // 10-4 = 6 dropped
+    TEST_ASSERT_EQUAL_UINT(4, r.count());
+    uint8_t out[4], exp[4] = {6, 7, 8, 9};
+    r.Read(out, 4);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(exp, out, 4);
+}
+
+// The overnight scenario: push far past capacity with no draining. keepall
+// pins at cap-1 (holds the oldest); keeplatest pins at the keep window (holds
+// the newest). Neither grows unbounded -> bounded catch-up under keeplatest.
+static void test_byte_ring_backlog_bound() {
+    uint8_t bufA[128], bufL[128];
+    util::ByteRing ka, kl;
+    ka.Init(bufA, sizeof bufA); ka.SetPolicy(util::ByteRing::kKeepAll, 0);
+    kl.Init(bufL, sizeof bufL); kl.SetPolicy(util::ByteRing::kKeepLatest, 16);
+
+    uint8_t chunk[32];
+    for (int round = 0; round < 100; round++) {
+        for (int i = 0; i < 32; i++) chunk[i] = (uint8_t)(round * 32 + i);
+        ka.Push(chunk, 32);
+        kl.Push(chunk, 32);
+    }
+    TEST_ASSERT_EQUAL_UINT(127, ka.count());           // keepall: full, oldest
+    TEST_ASSERT_EQUAL_UINT(16, kl.count());            // keeplatest: bounded
+
+    uint8_t out[16];                                   // holds the freshest 16
+    kl.Read(out, 16);
+    for (int i = 0; i < 16; i++)
+        TEST_ASSERT_EQUAL_UINT8((uint8_t)(99 * 32 + 16 + i), out[i]);
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_byte_ring_keepall);
+    RUN_TEST(test_byte_ring_keeplatest);
+    RUN_TEST(test_byte_ring_keeplatest_big_push);
+    RUN_TEST(test_byte_ring_backlog_bound);
     RUN_TEST(test_compress_roundtrip);
     RUN_TEST(test_aead_kat);
     RUN_TEST(test_aead_tamper);
